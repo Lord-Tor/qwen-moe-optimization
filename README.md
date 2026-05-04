@@ -16,6 +16,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
 
 ## 🚀 Использование
 
@@ -43,4 +44,4 @@ python scripts/qwen_mmlu_biased.py --subject high_school_mathematics --bias_file
 - [ ] Оценка эффективности частотного доменного смещения (сравнение точности).
 - [ ] Миграция на облачные GPU (Yandex Cloud DataSphere A100) для полномасштабных тестов[cite: 3].
 - [ ] Генерация смещения на основе градиентов (оптимизация под уменьшение Loss вместо частоты выбора)[cite: 3].
- -[ ] Динамическая фильтрация (Thresholding) роутера для ускорения инференса[cite: 3].
+-[ ] Динамическая фильтрация (Thresholding) роутера для ускорения инференса[cite: 3].
