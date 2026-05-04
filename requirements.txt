@@ -1,0 +1,9 @@
+torch
+torchvision
+torchaudio
+accelerate
+datasets
+evaluate
+sentencepiece
+huggingface_hub
+transformers>=4.38.0

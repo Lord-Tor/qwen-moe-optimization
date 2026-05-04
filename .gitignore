@@ -1,0 +1,13 @@
+
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+results/*.jsonl
+results/*.log
+*.safetensors
+*.bin
+*.pt
