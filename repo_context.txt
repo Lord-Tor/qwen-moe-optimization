@@ -1,0 +1,787 @@
+=== СТРУКТУРА РЕПОЗИТОРИЯ (GitHub: Lord-Tor/qwen-moe-optimization) ===
+qwen-moe-optimization/
+├── .git/
+├── .venv/            # Виртуальное окружение (игнорируется)
+├── configs/          # JSON файлы с векторами смещений (*_bias.json)
+├── data/             # Данные и кэш (игнорируется)
+├── notebooks/        # .ipynb тетрадки для аналитики
+├── results/          # Логи и .jsonl результаты MMLU
+├── scripts/          # Исполняемые файлы (.py и .sh)
+├── src/              # [Пока пустая] Ядро проекта
+├── .gitignore
+├── README.md
+├── repo_context.txt
+└── requirements.txt
+
+=== СОДЕРЖИМОЕ ИСХОДНОГО КОДА ===
+
+
+--- FILE: scripts/analyze_routing.py ---
+
+import json
+import sys
+from collections import defaultdict, Counter
+
+files = sys.argv[1:]
+layer_expert_counts = defaultdict(Counter)
+total_examples = 0
+
+for path in files:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = json.loads(line)
+            total_examples += 1
+            routing = row.get("router_last_token_topk", {})
+            for layer_name, info in routing.items():
+                for expert_id in info.get("topk_experts", []):
+                    layer_expert_counts[layer_name][expert_id] += 1
+
+print(f"examples: {total_examples}")
+for layer_name in sorted(layer_expert_counts.keys(), key=lambda x: int(x.split('_')[1])):
+    top = layer_expert_counts[layer_name].most_common(10)
+    print(f"\n{layer_name}")
+    for expert_id, cnt in top:
+        print(f"  expert {expert_id}: {cnt}")
+
+
+--- FILE: scripts/build_domain_bias.py ---
+
+import json
+import sys
+from collections import defaultdict, Counter
+
+domain = sys.argv[1]
+files = sys.argv[2:]
+
+layer_expert_counts = defaultdict(Counter)
+
+for path in files:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = json.loads(line)
+            routing = row.get("router_last_token_topk", {})
+            for layer_name, info in routing.items():
+                for expert_id in info.get("topk_experts", []):
+                    layer_expert_counts[layer_name][expert_id] += 1
+
+bias = {}
+for layer_name, counter in layer_expert_counts.items():
+    top_experts = [expert for expert, _ in counter.most_common(4)]
+    bias[layer_name] = {str(expert): 0.2 for expert in top_experts}
+
+out = {
+    "domain": domain,
+    "bias": bias,
+}
+with open(f"{domain}_bias.json", "w", encoding="utf-8") as f:
+    json.dump(out, f, ensure_ascii=False, indent=2)
+
+print(f"saved: {domain}_bias.json")
+
+
+--- FILE: scripts/qwen_mmlu_biased.py ---
+
+import argparse
+import gc
+import json
+import time
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# --- Скопированные из onepass вспомогательные функции ---
+def build_prompt(question, choices):
+    return (f"Question: {question}\n"
+            f"A. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:")
+
+def extract_last_token_topk(router_logits_tuple, k=4):
+    result = {}
+    if router_logits_tuple is None: return result
+    for layer_idx, layer_logits in enumerate(router_logits_tuple):
+        if layer_logits is None: continue
+        if layer_logits.dim() == 3: logits_last = layer_logits[0, -1]
+        elif layer_logits.dim() == 2: logits_last = layer_logits[-1]
+        elif layer_logits.dim() == 1: logits_last = layer_logits
+        else: continue
+        probs = torch.softmax(logits_last, dim=-1)
+        kk = min(k, probs.shape[-1])
+        topk_vals, topk_idx = torch.topk(probs, k=kk)
+        result[f"layer_{layer_idx}"] = {
+            "topk_experts": topk_idx.detach().cpu().tolist(),
+            "topk_probs": [float(x) for x in topk_vals.detach().cpu().tolist()]
+        }
+    return result
+
+def prepare_choice_token_ids(tokenizer):
+    return {ch: tokenizer(" " + ch, add_special_tokens=False)["input_ids"][0] for ch in ["A", "B", "C", "D"]}
+
+def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    input_ids, attention_mask = inputs["input_ids"].to(device), inputs["attention_mask"].to(device)
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False, output_router_logits=True, return_dict=True)
+    next_token_logits = outputs.logits[0, -1]
+    log_probs = torch.log_softmax(next_token_logits, dim=-1)
+    scores = {ch: float(log_probs[token_id].item()) for ch, token_id in choice_token_ids.items()}
+    router_info = extract_last_token_topk(outputs.router_logits, k=4)
+    return scores, router_info
+
+# --- МАГИЯ HOOKS: Внедрение Bias ---
+def apply_bias_hooks(model, bias_file, device, dtype):
+    with open(bias_file, "r", encoding="utf-8") as f:
+        bias_data = json.load(f)
+    
+    hooks = []
+    for i, layer in enumerate(model.model.layers):
+        layer_name = f"layer_{i}"
+        if layer_name in bias_data["bias"]:
+            # Создаем тензор смещения (размер 60 экспертов, заполнен нулями)
+            bias_tensor = torch.zeros(model.config.num_experts, device=device, dtype=dtype)
+            # Заполняем смещениями из JSON
+            for exp_id, val in bias_data["bias"][layer_name].items():
+                bias_tensor[int(exp_id)] = float(val)
+            
+            # Функция-хук, которая прибавляет bias к выходу роутера
+            def get_hook(b_tensor):
+                def hook(module, args, output):
+                    return output + b_tensor # output - это router_logits
+                return hook
+            
+            # Регистрируем хук на gate (роутере)
+            h = layer.mlp.gate.register_forward_hook(get_hook(bias_tensor))
+            hooks.append(h)
+    
+    print(f"[bias] Applied bias hooks from {bias_file} to {len(hooks)} layers.")
+    return hooks
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
+    parser.add_argument("--subject", type=str, default="high_school_mathematics")
+    parser.add_argument("--split", type=str, default="test")
+    parser.add_argument("--limit", type=int, default=110)
+    parser.add_argument("--output", type=str, default="results/mmlu_biased.jsonl")
+    parser.add_argument("--experts_impl", type=str, default="eager")
+    parser.add_argument("--bias_file", type=str, required=True, help="Path to JSON bias file")
+    args = parser.parse_args()
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    dtype = torch.float16 if device == "mps" else torch.float32
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, low_cpu_mem_usage=True)
+    model.to(device)
+    model.eval()
+    model.config._experts_implementation = args.experts_impl
+
+    # ВНЕДРЯЕМ БИАС
+    apply_bias_hooks(model, args.bias_file, device, dtype)
+
+    ds = load_dataset("cais/mmlu", args.subject, split=args.split)
+    choice_token_ids = prepare_choice_token_ids(tokenizer)
+    answer_map = {0: "A", 1: "B", 2: "C", 3: "D"}
+    
+    total = correct = 0
+    with open(args.output, "w", encoding="utf-8") as fout:
+        for i, ex in enumerate(ds):
+            if i >= args.limit: break
+            q_start = time.perf_counter()
+            gold = answer_map[int(ex["answer"])]
+            prompt = build_prompt(ex["question"], ex["choices"])
+            
+            infer_start = time.perf_counter()
+            scores, router_info = onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids)
+            infer_time = time.perf_counter() - infer_start
+            
+            pred = max(scores, key=scores.get)
+            is_correct = pred == gold
+            total += 1; correct += int(is_correct)
+            elapsed = time.perf_counter() - q_start
+            
+            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct, "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+            
+            print(f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s scores={scores}")
+            
+            gc.collect()
+            if device == "mps": torch.mps.empty_cache()
+
+    print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
+
+if __name__ == "__main__":
+    main()
+
+
+--- FILE: scripts/qwen_mmlu_onepass.py ---
+
+import argparse
+import gc
+import json
+import time
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+def build_prompt(question, choices):
+    return (f"Question: {question}\n"
+            f"A. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:")
+
+def extract_last_token_topk(router_logits_tuple, k=4):
+    result = {}
+    if router_logits_tuple is None: return result
+    for layer_idx, layer_logits in enumerate(router_logits_tuple):
+        if layer_logits is None: continue
+        if layer_logits.dim() == 3: logits_last = layer_logits[0, -1]
+        elif layer_logits.dim() == 2: logits_last = layer_logits[-1]
+        elif layer_logits.dim() == 1: logits_last = layer_logits
+        else: continue
+        probs = torch.softmax(logits_last, dim=-1)
+        kk = min(k, probs.shape[-1])
+        topk_vals, topk_idx = torch.topk(probs, k=kk)
+        result[f"layer_{layer_idx}"] = {
+            "topk_experts": topk_idx.detach().cpu().tolist(),
+            "topk_probs": [float(x) for x in topk_vals.detach().cpu().tolist()]
+        }
+    return result
+
+def prepare_choice_token_ids(tokenizer):
+    return {ch: tokenizer(" " + ch, add_special_tokens=False)["input_ids"][0] for ch in ["A", "B", "C", "D"]}
+
+def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    input_ids, attention_mask = inputs["input_ids"].to(device), inputs["attention_mask"].to(device)
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False, output_router_logits=True, return_dict=True)
+    next_token_logits = outputs.logits[0, -1]
+    log_probs = torch.log_softmax(next_token_logits, dim=-1)
+    scores = {ch: float(log_probs[token_id].item()) for ch, token_id in choice_token_ids.items()}
+    router_info = extract_last_token_topk(outputs.router_logits, k=4)
+    return scores, router_info
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
+    parser.add_argument("--subject", type=str, default="high_school_mathematics")
+    parser.add_argument("--split", type=str, default="test")
+    parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--offset", type=int, default=0, help="Skip first N examples")
+    parser.add_argument("--output", type=str, default="mmlu_onepass_results.jsonl")
+    parser.add_argument("--experts_impl", type=str, default="eager")
+    args = parser.parse_args()
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    dtype = torch.float16 if device == "mps" else torch.float32
+
+    t0 = time.perf_counter()
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    print(f"[time] load_tokenizer: {time.perf_counter() - t0:.3f}s")
+
+    t0 = time.perf_counter()
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, low_cpu_mem_usage=True)
+    model.to(device)
+    model.eval()
+    model.config._experts_implementation = args.experts_impl
+    print(f"[time] load_model: {time.perf_counter() - t0:.3f}s")
+
+    ds = load_dataset("cais/mmlu", args.subject, split=args.split)
+    choice_token_ids = prepare_choice_token_ids(tokenizer)
+    answer_map = {0: "A", 1: "B", 2: "C", 3: "D"}
+
+    total = correct = 0
+    with open(args.output, "w", encoding="utf-8") as fout:
+        for i, ex in enumerate(ds):
+            if i < args.offset:
+                continue
+            if i >= args.offset + args.limit:
+                break
+            
+            q_start = time.perf_counter()
+            gold = answer_map[int(ex["answer"])]
+            prompt = build_prompt(ex["question"], ex["choices"])
+
+            infer_start = time.perf_counter()
+            scores, router_info = onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids)
+            infer_time = time.perf_counter() - infer_start
+
+            pred = max(scores, key=scores.get)
+            is_correct = pred == gold
+            total += 1
+            correct += int(is_correct)
+            elapsed = time.perf_counter() - q_start
+
+            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct, "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+
+            print(f"[{i+1}/{args.offset + args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s")
+            gc.collect()
+            if device == "mps": torch.mps.empty_cache()
+
+    print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
+
+if __name__ == "__main__":
+    main()
+
+
+--- FILE: scripts/analyze_routing.py ---
+
+import json
+import sys
+from collections import defaultdict, Counter
+
+files = sys.argv[1:]
+layer_expert_counts = defaultdict(Counter)
+total_examples = 0
+
+for path in files:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = json.loads(line)
+            total_examples += 1
+            routing = row.get("router_last_token_topk", {})
+            for layer_name, info in routing.items():
+                for expert_id in info.get("topk_experts", []):
+                    layer_expert_counts[layer_name][expert_id] += 1
+
+print(f"examples: {total_examples}")
+for layer_name in sorted(layer_expert_counts.keys(), key=lambda x: int(x.split('_')[1])):
+    top = layer_expert_counts[layer_name].most_common(10)
+    print(f"\n{layer_name}")
+    for expert_id, cnt in top:
+        print(f"  expert {expert_id}: {cnt}")
+
+
+--- FILE: scripts/build_domain_bias.py ---
+
+import json
+import sys
+from collections import defaultdict, Counter
+
+domain = sys.argv[1]
+files = sys.argv[2:]
+
+layer_expert_counts = defaultdict(Counter)
+
+for path in files:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            row = json.loads(line)
+            routing = row.get("router_last_token_topk", {})
+            for layer_name, info in routing.items():
+                for expert_id in info.get("topk_experts", []):
+                    layer_expert_counts[layer_name][expert_id] += 1
+
+bias = {}
+for layer_name, counter in layer_expert_counts.items():
+    top_experts = [expert for expert, _ in counter.most_common(4)]
+    bias[layer_name] = {str(expert): 0.2 for expert in top_experts}
+
+out = {
+    "domain": domain,
+    "bias": bias,
+}
+with open(f"{domain}_bias.json", "w", encoding="utf-8") as f:
+    json.dump(out, f, ensure_ascii=False, indent=2)
+
+print(f"saved: {domain}_bias.json")
+
+
+--- FILE: scripts/qwen_mmlu_biased.py ---
+
+import argparse
+import gc
+import json
+import time
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# --- Скопированные из onepass вспомогательные функции ---
+def build_prompt(question, choices):
+    return (f"Question: {question}\n"
+            f"A. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:")
+
+def extract_last_token_topk(router_logits_tuple, k=4):
+    result = {}
+    if router_logits_tuple is None: return result
+    for layer_idx, layer_logits in enumerate(router_logits_tuple):
+        if layer_logits is None: continue
+        if layer_logits.dim() == 3: logits_last = layer_logits[0, -1]
+        elif layer_logits.dim() == 2: logits_last = layer_logits[-1]
+        elif layer_logits.dim() == 1: logits_last = layer_logits
+        else: continue
+        probs = torch.softmax(logits_last, dim=-1)
+        kk = min(k, probs.shape[-1])
+        topk_vals, topk_idx = torch.topk(probs, k=kk)
+        result[f"layer_{layer_idx}"] = {
+            "topk_experts": topk_idx.detach().cpu().tolist(),
+            "topk_probs": [float(x) for x in topk_vals.detach().cpu().tolist()]
+        }
+    return result
+
+def prepare_choice_token_ids(tokenizer):
+    return {ch: tokenizer(" " + ch, add_special_tokens=False)["input_ids"][0] for ch in ["A", "B", "C", "D"]}
+
+def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    input_ids, attention_mask = inputs["input_ids"].to(device), inputs["attention_mask"].to(device)
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False, output_router_logits=True, return_dict=True)
+    next_token_logits = outputs.logits[0, -1]
+    log_probs = torch.log_softmax(next_token_logits, dim=-1)
+    scores = {ch: float(log_probs[token_id].item()) for ch, token_id in choice_token_ids.items()}
+    router_info = extract_last_token_topk(outputs.router_logits, k=4)
+    return scores, router_info
+
+# --- МАГИЯ HOOKS: Внедрение Bias ---
+def apply_bias_hooks(model, bias_file, device, dtype):
+    with open(bias_file, "r", encoding="utf-8") as f:
+        bias_data = json.load(f)
+    
+    hooks = []
+    for i, layer in enumerate(model.model.layers):
+        layer_name = f"layer_{i}"
+        if layer_name in bias_data["bias"]:
+            # Создаем тензор смещения (размер 60 экспертов, заполнен нулями)
+            bias_tensor = torch.zeros(model.config.num_experts, device=device, dtype=dtype)
+            # Заполняем смещениями из JSON
+            for exp_id, val in bias_data["bias"][layer_name].items():
+                bias_tensor[int(exp_id)] = float(val)
+            
+            # Функция-хук, которая прибавляет bias к выходу роутера
+            def get_hook(b_tensor):
+                def hook(module, args, output):
+                    return output + b_tensor # output - это router_logits
+                return hook
+            
+            # Регистрируем хук на gate (роутере)
+            h = layer.mlp.gate.register_forward_hook(get_hook(bias_tensor))
+            hooks.append(h)
+    
+    print(f"[bias] Applied bias hooks from {bias_file} to {len(hooks)} layers.")
+    return hooks
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
+    parser.add_argument("--subject", type=str, default="high_school_mathematics")
+    parser.add_argument("--split", type=str, default="test")
+    parser.add_argument("--limit", type=int, default=110)
+    parser.add_argument("--output", type=str, default="results/mmlu_biased.jsonl")
+    parser.add_argument("--experts_impl", type=str, default="eager")
+    parser.add_argument("--bias_file", type=str, required=True, help="Path to JSON bias file")
+    args = parser.parse_args()
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    dtype = torch.float16 if device == "mps" else torch.float32
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, low_cpu_mem_usage=True)
+    model.to(device)
+    model.eval()
+    model.config._experts_implementation = args.experts_impl
+
+    # ВНЕДРЯЕМ БИАС
+    apply_bias_hooks(model, args.bias_file, device, dtype)
+
+    ds = load_dataset("cais/mmlu", args.subject, split=args.split)
+    choice_token_ids = prepare_choice_token_ids(tokenizer)
+    answer_map = {0: "A", 1: "B", 2: "C", 3: "D"}
+    
+    total = correct = 0
+    with open(args.output, "w", encoding="utf-8") as fout:
+        for i, ex in enumerate(ds):
+            if i >= args.limit: break
+            q_start = time.perf_counter()
+            gold = answer_map[int(ex["answer"])]
+            prompt = build_prompt(ex["question"], ex["choices"])
+            
+            infer_start = time.perf_counter()
+            scores, router_info = onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids)
+            infer_time = time.perf_counter() - infer_start
+            
+            pred = max(scores, key=scores.get)
+            is_correct = pred == gold
+            total += 1; correct += int(is_correct)
+            elapsed = time.perf_counter() - q_start
+            
+            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct, "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+            
+            print(f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s scores={scores}")
+            
+            gc.collect()
+            if device == "mps": torch.mps.empty_cache()
+
+    print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
+
+if __name__ == "__main__":
+    main()
+
+
+--- FILE: scripts/qwen_mmlu_onepass.py ---
+
+import argparse
+import gc
+import json
+import time
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+def build_prompt(question, choices):
+    return (f"Question: {question}\n"
+            f"A. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:")
+
+def extract_last_token_topk(router_logits_tuple, k=4):
+    result = {}
+    if router_logits_tuple is None: return result
+    for layer_idx, layer_logits in enumerate(router_logits_tuple):
+        if layer_logits is None: continue
+        if layer_logits.dim() == 3: logits_last = layer_logits[0, -1]
+        elif layer_logits.dim() == 2: logits_last = layer_logits[-1]
+        elif layer_logits.dim() == 1: logits_last = layer_logits
+        else: continue
+        probs = torch.softmax(logits_last, dim=-1)
+        kk = min(k, probs.shape[-1])
+        topk_vals, topk_idx = torch.topk(probs, k=kk)
+        result[f"layer_{layer_idx}"] = {
+            "topk_experts": topk_idx.detach().cpu().tolist(),
+            "topk_probs": [float(x) for x in topk_vals.detach().cpu().tolist()]
+        }
+    return result
+
+def prepare_choice_token_ids(tokenizer):
+    return {ch: tokenizer(" " + ch, add_special_tokens=False)["input_ids"][0] for ch in ["A", "B", "C", "D"]}
+
+def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
+    inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    input_ids, attention_mask = inputs["input_ids"].to(device), inputs["attention_mask"].to(device)
+    with torch.no_grad():
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False, output_router_logits=True, return_dict=True)
+    next_token_logits = outputs.logits[0, -1]
+    log_probs = torch.log_softmax(next_token_logits, dim=-1)
+    scores = {ch: float(log_probs[token_id].item()) for ch, token_id in choice_token_ids.items()}
+    router_info = extract_last_token_topk(outputs.router_logits, k=4)
+    return scores, router_info
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
+    parser.add_argument("--subject", type=str, default="high_school_mathematics")
+    parser.add_argument("--split", type=str, default="test")
+    parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--offset", type=int, default=0, help="Skip first N examples")
+    parser.add_argument("--output", type=str, default="mmlu_onepass_results.jsonl")
+    parser.add_argument("--experts_impl", type=str, default="eager")
+    args = parser.parse_args()
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    dtype = torch.float16 if device == "mps" else torch.float32
+
+    t0 = time.perf_counter()
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    print(f"[time] load_tokenizer: {time.perf_counter() - t0:.3f}s")
+
+    t0 = time.perf_counter()
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, low_cpu_mem_usage=True)
+    model.to(device)
+    model.eval()
+    model.config._experts_implementation = args.experts_impl
+    print(f"[time] load_model: {time.perf_counter() - t0:.3f}s")
+
+    ds = load_dataset("cais/mmlu", args.subject, split=args.split)
+    choice_token_ids = prepare_choice_token_ids(tokenizer)
+    answer_map = {0: "A", 1: "B", 2: "C", 3: "D"}
+
+    total = correct = 0
+    with open(args.output, "w", encoding="utf-8") as fout:
+        for i, ex in enumerate(ds):
+            if i < args.offset:
+                continue
+            if i >= args.offset + args.limit:
+                break
+            
+            q_start = time.perf_counter()
+            gold = answer_map[int(ex["answer"])]
+            prompt = build_prompt(ex["question"], ex["choices"])
+
+            infer_start = time.perf_counter()
+            scores, router_info = onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids)
+            infer_time = time.perf_counter() - infer_start
+
+            pred = max(scores, key=scores.get)
+            is_correct = pred == gold
+            total += 1
+            correct += int(is_correct)
+            elapsed = time.perf_counter() - q_start
+
+            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct, "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
+            fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fout.flush()
+
+            print(f"[{i+1}/{args.offset + args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s")
+            gc.collect()
+            if device == "mps": torch.mps.empty_cache()
+
+    print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
+
+if __name__ == "__main__":
+    main()
+
+
+--- FILE: configs/math_full_bias.json ---
+
+{
+  "domain": "math_full",
+  "bias": {
+    "layer_0": {
+      "32": 0.2,
+      "19": 0.2,
+      "25": 0.2,
+      "53": 0.2
+    },
+    "layer_1": {
+      "13": 0.2,
+      "53": 0.2,
+      "51": 0.2,
+      "45": 0.2
+    },
+    "layer_2": {
+      "23": 0.2,
+      "51": 0.2,
+      "52": 0.2,
+      "37": 0.2
+    },
+    "layer_3": {
+      "47": 0.2,
+      "46": 0.2,
+      "19": 0.2,
+      "48": 0.2
+    },
+    "layer_4": {
+      "36": 0.2,
+      "10": 0.2,
+      "37": 0.2,
+      "32": 0.2
+    },
+    "layer_5": {
+      "16": 0.2,
+      "18": 0.2,
+      "56": 0.2,
+      "46": 0.2
+    },
+    "layer_6": {
+      "23": 0.2,
+      "4": 0.2,
+      "20": 0.2,
+      "2": 0.2
+    },
+    "layer_7": {
+      "59": 0.2,
+      "51": 0.2,
+      "13": 0.2,
+      "32": 0.2
+    },
+    "layer_8": {
+      "21": 0.2,
+      "37": 0.2,
+      "42": 0.2,
+      "10": 0.2
+    },
+    "layer_9": {
+      "33": 0.2,
+      "31": 0.2,
+      "42": 0.2,
+      "16": 0.2
+    },
+    "layer_10": {
+      "30": 0.2,
+      "22": 0.2,
+      "25": 0.2,
+      "53": 0.2
+    },
+    "layer_11": {
+      "43": 0.2,
+      "16": 0.2,
+      "55": 0.2,
+      "56": 0.2
+    },
+    "layer_12": {
+      "21": 0.2,
+      "5": 0.2,
+      "20": 0.2,
+      "36": 0.2
+    },
+    "layer_13": {
+      "39": 0.2,
+      "10": 0.2,
+      "0": 0.2,
+      "36": 0.2
+    },
+    "layer_14": {
+      "45": 0.2,
+      "46": 0.2,
+      "52": 0.2,
+      "43": 0.2
+    },
+    "layer_15": {
+      "59": 0.2,
+      "29": 0.2,
+      "58": 0.2,
+      "38": 0.2
+    },
+    "layer_16": {
+      "1": 0.2,
+      "6": 0.2,
+      "45": 0.2,
+      "57": 0.2
+    },
+    "layer_17": {
+      "38": 0.2,
+      "49": 0.2,
+      "24": 0.2,
+      "13": 0.2
+    },
+    "layer_18": {
+      "35": 0.2,
+      "4": 0.2,
+      "6": 0.2,
+      "45": 0.2
+    },
+    "layer_19": {
+      "44": 0.2,
+      "58": 0.2,
+      "5": 0.2,
+      "32": 0.2
+    },
+    "layer_20": {
+      "26": 0.2,
+      "38": 0.2,
+      "36": 0.2,
+      "59": 0.2
+    },
+    "layer_21": {
+      "23": 0.2,
+      "29": 0.2,
+      "34": 0.2,
+      "24": 0.2
+    },
+    "layer_22": {
+      "57": 0.2,
+      "51": 0.2,
+      "6": 0.2,
+      "25": 0.2
+    },
+    "layer_23": {
+      "58": 0.2,
+      "38": 0.2,
+      "31": 0.2,
+      "40": 0.2
+    }
+  }
+}
+
+=== END OF REPOSITORY ===

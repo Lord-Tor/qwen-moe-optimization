@@ -1,18 +1,46 @@
-# 🚀 Qwen1.5-MoE Routing Optimization [WIP]
+# 🚀 Оптимизация маршрутизации Qwen1.5-MoE [WIP]
 
-Optimization of Mixture-of-Experts (MoE) routing mechanisms for domain-specific tasks without full fine-tuning.
+Проект по оптимизации механизмов маршрутизации (routing) в Mixture-of-Experts (MoE) моделях для улучшения работы в конкретных доменах знаний без полного дообучения.
 
-## 📖 Project Overview
-This project investigates how modifying the router logits in the `Qwen1.5-MoE-A2.7B` model affects its performance on specific knowledge domains (e.g., High School Mathematics). By analyzing the natural routing distribution and applying a gradient-free frequency-based bias, we aim to surgically improve domain accuracy while maintaining inference efficiency.
+## 📖 Обзор проекта
+Данное исследование изучает, как модификация логитов роутера в модели `Qwen1.5-MoE-A2.7B` влияет на её производительность в специфических областях (например, высшая математика). Анализируя естественное распределение маршрутизации и применяя частотное смещение (bias) без использования градиентов, мы стремимся точечно улучшить точность модели, сохраняя при этом эффективность вычислений.
 
-## ⚙️ Repository Structure
-- `configs/` — JSON files containing generated domain-specific bias vectors.
-- `scripts/` — Executable Python and Bash scripts for inference, evaluation, and analysis.
-- `src/` — Core utilities (prompts, hooks, logprob scorers).
-- `results/` — Evaluation logs and routing statistics (ignored in version control).
+## ⚙️ Структура репозитория
+- `configs/` (ранее `bias_configs/`) — JSON-файлы с вектором смещения для конкретных доменов.
+- `scripts/` — исполняемые Python и Bash скрипты для инференса, оценки и анализа.
+- `src/` — основной переиспользуемый код (промпты, хуки, функции скоринга).
+- `results/` — логи оценки и статистика маршрутизации (игнорируются системой контроля версий).
 
-## 🛠 Installation
+## 🛠 Установка
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+## 🚀 Использование
+
+**1. Запуск базовой оценки (One-Pass Baseline):**
+```bash
+python scripts/qwen_mmlu_onepass.py --subject high_school_mathematics --limit 50
+```[cite: 4]
+
+**2. Внедрение доменного смещения через Forward Hooks:**
+```bash
+python scripts/qwen_mmlu_biased.py --subject high_school_mathematics --bias_file configs/math_full_bias.json
+```[cite: 4]
+
+## 📊 Текущие результаты
+**Базовая оценка (MMLU Baseline):**
+* **Домен:** `high_school_mathematics`[cite: 3, 4]
+* **Выборка:** Полный тестовый сплит (270 примеров)[cite: 3, 4]
+* **Метод:** One-pass next-token logprob scoring[cite: 3, 4]
+* **Точность:** 29.26% (79/270)[cite: 3, 4]
+
+## 🗺️ Roadmap
+- [x] Настройка локального окружения и верификация MoE архитектуры (Apple MPS).[cite: 3, 4].
+- [x] Реализация быстрого однопроходного пайплайна оценки для MMLU[cite: 3].
+- [x] Извлечение статистики роутера (top-k) и генерация частотного bias-вектора[cite: 3].
+- [ ] Оценка эффективности частотного доменного смещения (сравнение точности).
+- [ ] Миграция на облачные GPU (Yandex Cloud DataSphere A100) для полномасштабных тестов[cite: 3].
+- [ ] Генерация смещения на основе градиентов (оптимизация под уменьшение Loss вместо частоты выбора)[cite: 3].
+ -[ ] Динамическая фильтрация (Thresholding) роутера для ускорения инференса[cite: 3].
