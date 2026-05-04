@@ -11,3 +11,6 @@ results/*.log
 *.safetensors
 *.bin
 *.pt
+
+# Датасеты и локальные данные
+data/
