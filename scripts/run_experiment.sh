@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=qwen_moe            
 #SBATCH --partition=gpu                
-#SBATCH --nodelist=nike                
+#SBATCH --nodes=1
+#SBATCH --nodelist=nike,kali              
 #SBATCH --gres=gpu:2                   
 #SBATCH --cpus-per-task=8              
 #SBATCH --mem=32G                      
