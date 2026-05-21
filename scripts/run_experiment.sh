@@ -7,15 +7,16 @@
 #SBATCH --cpus-per-task=8              
 #SBATCH --mem=32G                      
 #SBATCH --time=10:00:00                
-#SBATCH --output=results/slurm_moe_%j.log
+#SBATCH --output=slurm_moe_%j.log      
 
-# 1. Явные переменные окружения для вычислительного узла
 export HF_HOME=/mnt/tank/scratch/$USER/.cache/huggingface
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-# 2. Активация окружения Conda
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
+
+# Страховка: создаем нужные папки до запуска Python
+mkdir -p results configs
 
 echo "=== GPU Information ==="
 nvidia-smi

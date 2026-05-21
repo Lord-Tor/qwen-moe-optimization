@@ -1,5 +1,4 @@
 import argparse
-import gc
 import json
 import time
 import torch
@@ -27,7 +26,7 @@ def extract_last_token_topk(router_logits_tuple, k=4):
             logits_last = layer_logits
         else:
             continue
-        probs = torch.softmax(logits_last, dim=-1)
+        probs = torch.softmax(logits_last.to(torch.float32), dim=-1)
         kk = min(k, probs.shape[-1])
         topk_vals, topk_idx = torch.topk(probs, k=kk)
         result[f"layer_{layer_idx}"] = {
@@ -45,11 +44,14 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
     input_ids, attention_mask = inputs["input_ids"].to(
         device), inputs["attention_mask"].to(device)
+
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask,
                         use_cache=False, output_router_logits=True, return_dict=True)
+
     next_token_logits = outputs.logits[0, -1]
-    log_probs = torch.log_softmax(next_token_logits, dim=-1)
+    # Защита от переполнения fp16
+    log_probs = torch.log_softmax(next_token_logits.to(torch.float32), dim=-1)
     scores = {ch: float(log_probs[token_id].item())
               for ch, token_id in choice_token_ids.items()}
     router_info = extract_last_token_topk(outputs.router_logits, k=4)
@@ -63,28 +65,18 @@ def main():
                         default="high_school_mathematics")
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--limit", type=int, default=270)
-    parser.add_argument("--offset", type=int, default=0,
-                        help="Skip first N examples")
+    parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--output", type=str,
                         default="results/mmlu_onepass_results.jsonl")
     parser.add_argument("--experts_impl", type=str, default="batched_mm")
     args = parser.parse_args()
 
-    t0 = time.perf_counter()
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    print(f"[time] load_tokenizer: {time.perf_counter() - t0:.3f}s")
-
-    t0 = time.perf_counter()
 
     if torch.cuda.is_available():
         dtype = torch.float16
         model = AutoModelForCausalLM.from_pretrained(
-            args.model,
-            torch_dtype=dtype,
-            low_cpu_mem_usage=True,
-            device_map="auto",
-            attn_implementation="sdpa"
-        )
+            args.model, torch_dtype=dtype, low_cpu_mem_usage=True, device_map="auto", attn_implementation="sdpa")
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
         dtype = torch.float16
@@ -101,7 +93,6 @@ def main():
 
     model.eval()
     model.config._experts_implementation = args.experts_impl
-    print(f"[time] load_model: {time.perf_counter() - t0:.3f}s")
 
     ds = load_dataset("cais/mmlu", args.subject, split=args.split)
     choice_token_ids = prepare_choice_token_ids(tokenizer)
@@ -115,7 +106,6 @@ def main():
             if i >= args.offset + args.limit:
                 break
 
-            q_start = time.perf_counter()
             gold = answer_map[int(ex["answer"])]
             prompt = build_prompt(ex["question"], ex["choices"])
 
@@ -128,7 +118,6 @@ def main():
             is_correct = pred == gold
             total += 1
             correct += int(is_correct)
-            elapsed = time.perf_counter() - q_start
 
             row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct,
                    "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
@@ -136,12 +125,6 @@ def main():
             fout.flush()
 
             print(f"[{i+1}/{args.offset + args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s")
-
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            elif torch.backends.mps.is_available():
-                torch.mps.empty_cache()
 
     print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
 
