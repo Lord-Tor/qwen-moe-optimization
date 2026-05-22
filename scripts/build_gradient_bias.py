@@ -131,7 +131,14 @@ def main():
 
         for layer_name, logits_tensor in layer_logits_dict.items():
             if logits_tensor.grad is not None:
-                grad = logits_tensor.grad[0, -1, :].detach().to(model_device)
+                g = logits_tensor.grad
+                if g.dim() == 3:
+                    grad = g[0, -1, :].detach().to(model_device)
+                elif g.dim() == 2:
+                    grad = g[-1, :].detach().to(model_device)
+                else:
+                    grad = g.detach().to(model_device)
+
                 accumulated_grads[layer_name] += grad
 
         processed_examples += 1
