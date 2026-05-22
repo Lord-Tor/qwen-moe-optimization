@@ -29,8 +29,9 @@ def main():
 
     if torch.cuda.is_available():
         dtype = torch.float16
-        # ХИТРОСТЬ: Лжем библиотеке, чтобы освободить 18 ГБ на нулевой карте!
-        max_mem = {0: "6GiB", 1: "23GiB"}
+        # ХИТРОСТЬ 3.0: Заставляем accelerate положить ровно по 13-14 ГБ весов на карту.
+        # Это гарантирует, что на обеих GPU останется по ~10 ГБ под градиенты!
+        max_mem = {0: "14GiB", 1: "18GiB"}
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
             torch_dtype=dtype,
@@ -58,16 +59,13 @@ def main():
 
     model.config._experts_implementation = args.experts_impl
 
-    # Замораживаем веса модели
     for param in model.parameters():
         param.requires_grad = False
 
-    # Размораживаем ТОЛЬКО веса роутеров
     for layer in model.model.layers:
         if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             layer.mlp.gate.weight.requires_grad = True
 
-    # Включаем Gradient Checkpointing
     if hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     if hasattr(model, "gradient_checkpointing_enable"):
@@ -114,8 +112,9 @@ def main():
         input_ids = inputs["input_ids"].to(model_device)
         attention_mask = inputs["attention_mask"].to(model_device)
 
-        # Жесткая обрезка контекста для защиты от OOM
-        MAX_SEQ_LEN = 512
+        # ЖЕСТКИЙ ЛИМИТ: Оставляем только последние 256 токенов.
+        # Этого достаточно для роутера, а потребление VRAM падает в разы!
+        MAX_SEQ_LEN = 256
         if input_ids.shape[1] > MAX_SEQ_LEN:
             input_ids = input_ids[:, -MAX_SEQ_LEN:]
             attention_mask = attention_mask[:, -MAX_SEQ_LEN:]
@@ -145,7 +144,6 @@ def main():
 
         layer_logits_dict.clear()
 
-        # Полная очистка памяти перед следующей задачей
         del outputs, loss, next_token_logits, target
         gc.collect()
         if torch.cuda.is_available():
