@@ -35,9 +35,9 @@ for MODEL in "${MODELS[@]}"; do
 
     for SUBJ in "${SUBJECTS[@]}"; do
         echo "--- Processing: $SUBJ on $MODEL_NAME ---"
-        python scripts/qwen_mmlu_onepass.py --model $MODEL --subject $SUBJ --output results/${MODEL_NAME}_${SUBJ}_baseline.jsonl --limit 10000
-        python scripts/build_gradient_bias.py --model $MODEL --subject $SUBJ --output configs/${MODEL_NAME}_${SUBJ}_grad.json --limit 100
-        python scripts/qwen_mmlu_biased.py --model $MODEL --subject $SUBJ --bias_file configs/${MODEL_NAME}_${SUBJ}_grad.json --output results/${MODEL_NAME}_${SUBJ}_biased.jsonl --limit 10000
+        python scripts/qwen_mmlu_onepass.py --model $MODEL --subject $SUBJ --output results/${MODEL_NAME}_${SUBJ}_baseline.jsonl --limit 10000 --experts_impl eager
+        python scripts/build_gradient_bias.py --model $MODEL --subject $SUBJ --output configs/${MODEL_NAME}_${SUBJ}_grad.json --limit 100 --experts_impl eager
+        python scripts/qwen_mmlu_biased.py --model $MODEL --subject $SUBJ --bias_file configs/${MODEL_NAME}_${SUBJ}_grad.json --output results/${MODEL_NAME}_${SUBJ}_biased.jsonl --limit 10000 --experts_impl eager
     done
 done
 
