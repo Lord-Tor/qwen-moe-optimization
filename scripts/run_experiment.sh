@@ -15,7 +15,7 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
 
-python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"|| exit 1
 
 mkdir -p results configs
 

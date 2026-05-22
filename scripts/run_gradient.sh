@@ -15,11 +15,12 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
 
-python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"|| exit 1
 
 mkdir -p configs
 
 echo "=== Starting Gradient Collection ==="
-python scripts/build_gradient_bias.py --subject college_mathematics --limit 100 --output configs/math_grad_bias.json
+# Стало:
+python scripts/build_gradient_bias.py --subject college_mathematics --split test --limit 100 --output configs/math_grad_bias.json
 
 echo "=== Done ==="
