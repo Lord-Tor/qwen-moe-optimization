@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
     parser.add_argument("--subject", type=str, default="college_mathematics")
-    parser.add_argument("--split", type=str, default="validation")
+    parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
                         default="configs/math_grad_bias.json")
@@ -49,8 +49,14 @@ def main():
     model.eval()
     model.config._experts_implementation = args.experts_impl
 
+    # Сначала морозим всё
     for param in model.parameters():
         param.requires_grad = False
+
+    # Размораживаем ТОЛЬКО веса роутеров, чтобы заставить PyTorch построить честный граф
+    for layer in model.model.layers:
+        if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
+            layer.mlp.gate.weight.requires_grad = True
 
     layer_logits_dict = {}
 
@@ -58,10 +64,11 @@ def main():
         def hook(module, inputs, output):
             is_tuple = isinstance(output, tuple)
             logits = output[0] if is_tuple else output
-            new_logits = logits.detach().requires_grad_(True)
-            new_logits.retain_grad()
-            layer_logits_dict[name] = new_logits
-            return (new_logits,) + output[1:] if is_tuple else new_logits
+            # Просим PyTorch не удалять градиент этого узла после прохода
+            logits.retain_grad()
+            layer_logits_dict[name] = logits
+            # Возвращаем оригинальный output, ничего не ломая!
+            return output
         return hook
 
     hooks = []
