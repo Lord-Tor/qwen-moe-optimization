@@ -30,7 +30,13 @@ def main():
     if torch.cuda.is_available():
         dtype = torch.float16
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True, device_map="auto", attn_implementation="sdpa")
+            args.model,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            # ФИКС: Меняем жадный "auto" на балансировку с разгрузкой нулевой карты
+            device_map="balanced_low_0",
+            attn_implementation="sdpa"
+        )
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
         dtype = torch.float16
@@ -50,13 +56,16 @@ def main():
 
     model.config._experts_implementation = args.experts_impl
 
+    # Замораживаем веса модели
     for param in model.parameters():
         param.requires_grad = False
 
+    # Размораживаем ТОЛЬКО веса роутеров
     for layer in model.model.layers:
         if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             layer.mlp.gate.weight.requires_grad = True
 
+    # Включаем Gradient Checkpointing
     if hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     if hasattr(model, "gradient_checkpointing_enable"):
@@ -133,8 +142,12 @@ def main():
             f"[{processed_examples}/{args.limit}] Processed. Loss: {loss.item():.4f}")
 
         layer_logits_dict.clear()
+
+        # Полная очистка памяти перед следующей задачей
         del outputs, loss, next_token_logits, target
         gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     for h in hooks:
         h.remove()
