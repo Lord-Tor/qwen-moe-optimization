@@ -110,7 +110,7 @@ def main():
         input_ids = inputs["input_ids"].to(model_device)
         attention_mask = inputs["attention_mask"].to(model_device)
 
-        MAX_SEQ_LEN = 256
+        MAX_SEQ_LEN = 512
         if input_ids.shape[1] > MAX_SEQ_LEN:
             input_ids = input_ids[:, -MAX_SEQ_LEN:]
             attention_mask = attention_mask[:, -MAX_SEQ_LEN:]

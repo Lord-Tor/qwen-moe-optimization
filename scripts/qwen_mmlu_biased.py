@@ -45,9 +45,17 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
     input_ids, attention_mask = inputs["input_ids"].to(
         device), inputs["attention_mask"].to(device)
+
+    # Лимит контекста до 512 токенов (как в градиентах)
+    MAX_SEQ_LEN = 512
+    if input_ids.shape[1] > MAX_SEQ_LEN:
+        input_ids = input_ids[:, -MAX_SEQ_LEN:]
+        attention_mask = attention_mask[:, -MAX_SEQ_LEN:]
+
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask,
                         use_cache=False, output_router_logits=True, return_dict=True)
+
     next_token_logits = outputs.logits[0, -1]
     log_probs = torch.log_softmax(next_token_logits.to(torch.float32), dim=-1)
     scores = {ch: float(log_probs[token_id].item())
@@ -99,8 +107,16 @@ def main():
 
     if torch.cuda.is_available():
         dtype = torch.float16
+        # Спасаем GPU 0 от переполнения
+        max_mem = {0: "10GiB", 1: "22GiB"}
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True, device_map="auto", attn_implementation="sdpa")
+            args.model,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            device_map="auto",
+            max_memory=max_mem,
+            attn_implementation="sdpa"
+        )
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
         dtype = torch.float16
@@ -151,6 +167,8 @@ def main():
                 f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f}")
 
             gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
 
