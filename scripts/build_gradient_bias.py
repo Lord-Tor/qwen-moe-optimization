@@ -29,12 +29,14 @@ def main():
 
     if torch.cuda.is_available():
         dtype = torch.float16
+        # ХИТРОСТЬ: Лжем библиотеке, чтобы освободить 18 ГБ на нулевой карте!
+        max_mem = {0: "6GiB", 1: "23GiB"}
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
-            # ФИКС: Меняем жадный "auto" на балансировку с разгрузкой нулевой карты
-            device_map="balanced_low_0",
+            device_map="auto",
+            max_memory=max_mem,
             attn_implementation="sdpa"
         )
         model_device = model.model.embed_tokens.weight.device
