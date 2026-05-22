@@ -46,7 +46,7 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     input_ids, attention_mask = inputs["input_ids"].to(
         device), inputs["attention_mask"].to(device)
 
-    # Лимит контекста до 512 токенов (как в градиентах)
+    # Лимит контекста
     MAX_SEQ_LEN = 512
     if input_ids.shape[1] > MAX_SEQ_LEN:
         input_ids = input_ids[:, -MAX_SEQ_LEN:]
@@ -101,13 +101,14 @@ def main():
     parser.add_argument("--limit", type=int, default=270)
     parser.add_argument("--output", type=str,
                         default="results/math_biased_cluster.jsonl")
-    parser.add_argument("--experts_impl", type=str, default="batched_mm")
+    # Переводим инференс в безопасный режим eager
+    parser.add_argument("--experts_impl", type=str, default="eager")
     parser.add_argument("--bias_file", type=str, required=True)
     args = parser.parse_args()
 
     if torch.cuda.is_available():
         dtype = torch.float16
-        # Спасаем GPU 0 от переполнения
+        # Спасаем карты от переполнения
         max_mem = {0: "10GiB", 1: "22GiB"}
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
