@@ -21,7 +21,6 @@ def main():
     parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
     parser.add_argument("--subject", type=str,
                         default="high_school_mathematics")
-    # ИСПРАВЛЕНИЕ 1: Валидный сплит для MMLU
     parser.add_argument("--split", type=str, default="validation")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
@@ -51,7 +50,6 @@ def main():
     model.eval()
     model.config._experts_implementation = args.experts_impl
 
-    # Заморозка весов модели
     for param in model.parameters():
         param.requires_grad = False
 
@@ -59,10 +57,14 @@ def main():
 
     def capture_logits_hook(name):
         def hook(module, inputs, output):
-            new_out = output.detach().requires_grad_(True)
-            new_out.retain_grad()
-            layer_logits_dict[name] = new_out
-            return new_out
+            is_tuple = isinstance(output, tuple)
+            logits = output[0] if is_tuple else output
+
+            new_logits = logits.detach().requires_grad_(True)
+            new_logits.retain_grad()
+            layer_logits_dict[name] = new_logits
+
+            return (new_logits,) + output[1:] if is_tuple else new_logits
         return hook
 
     hooks = []
@@ -119,8 +121,12 @@ def main():
 
         layer_logits_dict.clear()
 
-        # ИСПРАВЛЕНИЕ 2: Удаляем тормозящий empty_cache(), оставляем только del
         del outputs, loss, next_token_logits, target
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
     for h in hooks:
         h.remove()

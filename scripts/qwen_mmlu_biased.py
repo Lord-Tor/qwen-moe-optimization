@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import time
 import torch
@@ -50,7 +51,6 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
                         use_cache=False, output_router_logits=True, return_dict=True)
 
     next_token_logits = outputs.logits[0, -1]
-    # Защита от переполнения fp16
     log_probs = torch.log_softmax(next_token_logits.to(torch.float32), dim=-1)
     scores = {ch: float(log_probs[token_id].item())
               for ch, token_id in choice_token_ids.items()}
@@ -72,7 +72,10 @@ def apply_bias_hooks(model, bias_file, dtype):
 
             def get_hook(b_tensor):
                 def hook(module, args, output):
-                    return output + b_tensor.to(output.device)
+                    is_tuple = isinstance(output, tuple)
+                    logits = output[0] if is_tuple else output
+                    modified_logits = logits + b_tensor.to(logits.device)
+                    return (modified_logits,) + output[1:] if is_tuple else modified_logits
                 return hook
 
             h = layer.mlp.gate.register_forward_hook(get_hook(bias_tensor))
@@ -93,8 +96,7 @@ def main():
     parser.add_argument("--output", type=str,
                         default="results/mmlu_biased.jsonl")
     parser.add_argument("--experts_impl", type=str, default="batched_mm")
-    parser.add_argument("--bias_file", type=str,
-                        required=True, help="Path to JSON bias file")
+    parser.add_argument("--bias_file", type=str, required=True)
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -150,6 +152,12 @@ def main():
             fout.flush()
 
             print(f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s")
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif torch.backends.mps.is_available():
+                torch.mps.empty_cache()
 
     print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
 
