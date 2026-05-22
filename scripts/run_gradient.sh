@@ -5,7 +5,7 @@
 #SBATCH --exclude=laplas,turing,mars,midas              
 #SBATCH --gres=gpu:2                   
 #SBATCH --cpus-per-task=8              
-#SBATCH --mem=64G                      
+#SBATCH --mem=58G                      
 #SBATCH --time=05:00:00                
 #SBATCH --output=slurm_grad_%j.log      
 
