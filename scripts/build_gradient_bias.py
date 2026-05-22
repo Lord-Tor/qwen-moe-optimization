@@ -19,8 +19,7 @@ def prepare_choice_token_ids(tokenizer):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen1.5-MoE-A2.7B")
-    parser.add_argument("--subject", type=str,
-                        default="high_school_mathematics")
+    parser.add_argument("--subject", type=str, default="college_mathematics")
     parser.add_argument("--split", type=str, default="validation")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
@@ -59,11 +58,9 @@ def main():
         def hook(module, inputs, output):
             is_tuple = isinstance(output, tuple)
             logits = output[0] if is_tuple else output
-
             new_logits = logits.detach().requires_grad_(True)
             new_logits.retain_grad()
             layer_logits_dict[name] = new_logits
-
             return (new_logits,) + output[1:] if is_tuple else new_logits
         return hook
 
@@ -120,13 +117,8 @@ def main():
             f"[{processed_examples}/{args.limit}] Processed. Loss: {loss.item():.4f}")
 
         layer_logits_dict.clear()
-
         del outputs, loss, next_token_logits, target
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif torch.backends.mps.is_available():
-            torch.mps.empty_cache()
 
     for h in hooks:
         h.remove()

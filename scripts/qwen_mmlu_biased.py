@@ -45,11 +45,9 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
     input_ids, attention_mask = inputs["input_ids"].to(
         device), inputs["attention_mask"].to(device)
-
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask,
                         use_cache=False, output_router_logits=True, return_dict=True)
-
     next_token_logits = outputs.logits[0, -1]
     log_probs = torch.log_softmax(next_token_logits.to(torch.float32), dim=-1)
     scores = {ch: float(log_probs[token_id].item())
@@ -94,7 +92,7 @@ def main():
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--limit", type=int, default=270)
     parser.add_argument("--output", type=str,
-                        default="results/mmlu_biased.jsonl")
+                        default="results/math_biased_cluster.jsonl")
     parser.add_argument("--experts_impl", type=str, default="batched_mm")
     parser.add_argument("--bias_file", type=str, required=True)
     args = parser.parse_args()
@@ -136,28 +134,23 @@ def main():
             gold = answer_map[int(ex["answer"])]
             prompt = build_prompt(ex["question"], ex["choices"])
 
-            infer_start = time.perf_counter()
             scores, router_info = onepass_choice_scores(
                 model, tokenizer, model_device, prompt, choice_token_ids)
-            infer_time = time.perf_counter() - infer_start
 
             pred = max(scores, key=scores.get)
             is_correct = pred == gold
             total += 1
             correct += int(is_correct)
 
-            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred, "correct": is_correct,
-                   "scores": scores, "infer_time_sec": infer_time, "router_last_token_topk": router_info}
+            row = {"index": i, "subject": args.subject, "gold": gold, "pred": pred,
+                   "correct": is_correct, "scores": scores, "router_last_token_topk": router_info}
             fout.write(json.dumps(row, ensure_ascii=False) + "\n")
             fout.flush()
 
-            print(f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f} infer={infer_time:.3f}s")
+            print(
+                f"[{i+1}/{args.limit}] gold={gold} pred={pred} correct={is_correct} acc={correct/total:.3f}")
 
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            elif torch.backends.mps.is_available():
-                torch.mps.empty_cache()
 
     print(f"Done. Accuracy: {correct}/{total} = {correct/total:.3f}")
 

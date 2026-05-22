@@ -14,14 +14,12 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
-# Проверка, что PyTorch видит GPU
-python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available! PyTorch failed to link with NVIDIA drivers.'"
+
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"
+
 mkdir -p configs
 
-echo "=== GPU Information ==="
-nvidia-smi
-
 echo "=== Starting Gradient Collection ==="
-python scripts/build_gradient_bias.py --subject high_school_mathematics --limit 100 --output configs/math_grad_bias.json
+python scripts/build_gradient_bias.py --subject college_mathematics --limit 100 --output configs/math_grad_bias.json
 
 echo "=== Done ==="
