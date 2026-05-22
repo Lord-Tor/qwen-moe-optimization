@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 #SBATCH --job-name=qwen_grad            
 #SBATCH --partition=gpu                
 #SBATCH --nodes=1

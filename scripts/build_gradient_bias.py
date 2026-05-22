@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
                         default="configs/math_grad_bias.json")
-    parser.add_argument("--experts_impl", type=str, default="batched_mm")
+    parser.add_argument("--experts_impl", type=str, default="naive")
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -47,16 +47,24 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model.eval()
-    model.config._experts_implementation = args.experts_impl
 
-    # Сначала морозим всё
+    # Жестко отключаем batched_mm на время сбора градиентов для экономии 4+ ГБ VRAM
+    model.config._experts_implementation = "naive"
+
+    # Замораживаем веса модели
     for param in model.parameters():
         param.requires_grad = False
 
-    # Размораживаем ТОЛЬКО веса роутеров, чтобы заставить PyTorch построить честный граф
+    # Размораживаем ТОЛЬКО веса роутеров, чтобы заставить PyTorch построить граф
     for layer in model.model.layers:
         if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             layer.mlp.gate.weight.requires_grad = True
+
+    # Включаем Gradient Checkpointing (экономит десятки гигабайт памяти)
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
 
     layer_logits_dict = {}
 
@@ -64,10 +72,11 @@ def main():
         def hook(module, inputs, output):
             is_tuple = isinstance(output, tuple)
             logits = output[0] if is_tuple else output
-            # Просим PyTorch не удалять градиент этого узла после прохода
-            logits.retain_grad()
-            layer_logits_dict[name] = logits
-            # Возвращаем оригинальный output, ничего не ломая!
+            # При включенном checkpointing тензор получает requires_grad=True
+            # только во время нужного прохода. Ловим именно его!
+            if logits.requires_grad:
+                logits.retain_grad()
+                layer_logits_dict[name] = logits
             return output
         return hook
 
