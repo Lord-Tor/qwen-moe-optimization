@@ -24,14 +24,12 @@ def main():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
                         default="configs/math_grad_bias.json")
-    parser.add_argument("--experts_impl", type=str, default="batched_mm")
+    parser.add_argument("--experts_impl", type=str, default="eager")
     args = parser.parse_args()
 
     if torch.cuda.is_available():
         dtype = torch.float16
-        # ХИТРОСТЬ 3.0: Заставляем accelerate положить ровно по 13-14 ГБ весов на карту.
-        # Это гарантирует, что на обеих GPU останется по ~10 ГБ под градиенты!
-        max_mem = {0: "14GiB", 1: "18GiB"}
+        max_mem = {0: "10GiB", 1: "22GiB"}
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
             torch_dtype=dtype,
@@ -112,8 +110,6 @@ def main():
         input_ids = inputs["input_ids"].to(model_device)
         attention_mask = inputs["attention_mask"].to(model_device)
 
-        # ЖЕСТКИЙ ЛИМИТ: Оставляем только последние 256 токенов.
-        # Этого достаточно для роутера, а потребление VRAM падает в разы!
         MAX_SEQ_LEN = 256
         if input_ids.shape[1] > MAX_SEQ_LEN:
             input_ids = input_ids[:, -MAX_SEQ_LEN:]
