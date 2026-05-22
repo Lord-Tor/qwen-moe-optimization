@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 #SBATCH --job-name=qwen_grad            
 #SBATCH --partition=gpu                
 #SBATCH --nodes=1
@@ -9,6 +8,7 @@ set -e
 #SBATCH --mem=58G                      
 #SBATCH --time=05:00:00                
 #SBATCH --output=slurm_grad_%j.log      
+set -e
 
 export HF_HOME=/mnt/tank/scratch/$USER/.cache/huggingface
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
