@@ -24,7 +24,8 @@ def main():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
                         default="configs/math_grad_bias.json")
-    parser.add_argument("--experts_impl", type=str, default="naive")
+    # Возвращаем родную реализацию Qwen
+    parser.add_argument("--experts_impl", type=str, default="batched_mm")
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -48,8 +49,8 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model.eval()
 
-    # Жестко отключаем batched_mm на время сбора градиентов для экономии 4+ ГБ VRAM
-    model.config._experts_implementation = "naive"
+    # Передаем конфигурации правильную строку из аргументов
+    model.config._experts_implementation = args.experts_impl
 
     # Замораживаем веса модели
     for param in model.parameters():
@@ -60,7 +61,7 @@ def main():
         if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             layer.mlp.gate.weight.requires_grad = True
 
-    # Включаем Gradient Checkpointing (экономит десятки гигабайт памяти)
+    # Включаем Gradient Checkpointing (спасает от OOM при batched_mm)
     if hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     if hasattr(model, "gradient_checkpointing_enable"):
@@ -72,8 +73,7 @@ def main():
         def hook(module, inputs, output):
             is_tuple = isinstance(output, tuple)
             logits = output[0] if is_tuple else output
-            # При включенном checkpointing тензор получает requires_grad=True
-            # только во время нужного прохода. Ловим именно его!
+            # При включенном checkpointing ловим нужный проход
             if logits.requires_grad:
                 logits.retain_grad()
                 layer_logits_dict[name] = logits
