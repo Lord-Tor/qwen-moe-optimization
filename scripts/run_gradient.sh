@@ -8,20 +8,22 @@
 #SBATCH --mem=58G                      
 #SBATCH --time=05:00:00                
 #SBATCH --output=slurm_grad_%j.log      
+
 set -e
 
 export HF_HOME=/mnt/tank/scratch/$USER/.cache/huggingface
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
+# Системный фикс для работы с памятью в PyTorch
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
 
-python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'"|| exit 1
+python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'" || exit 1
 
 mkdir -p configs
 
 echo "=== Starting Gradient Collection ==="
-# Стало:
 python scripts/build_gradient_bias.py --subject college_mathematics --split test --limit 100 --output configs/math_grad_bias.json
 
 echo "=== Done ==="

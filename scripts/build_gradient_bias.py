@@ -24,7 +24,6 @@ def main():
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output", type=str,
                         default="configs/math_grad_bias.json")
-    # Возвращаем родную реализацию Qwen
     parser.add_argument("--experts_impl", type=str, default="batched_mm")
     args = parser.parse_args()
 
@@ -49,19 +48,15 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model.eval()
 
-    # Передаем конфигурации правильную строку из аргументов
     model.config._experts_implementation = args.experts_impl
 
-    # Замораживаем веса модели
     for param in model.parameters():
         param.requires_grad = False
 
-    # Размораживаем ТОЛЬКО веса роутеров, чтобы заставить PyTorch построить граф
     for layer in model.model.layers:
         if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             layer.mlp.gate.weight.requires_grad = True
 
-    # Включаем Gradient Checkpointing (спасает от OOM при batched_mm)
     if hasattr(model, "enable_input_require_grads"):
         model.enable_input_require_grads()
     if hasattr(model, "gradient_checkpointing_enable"):
@@ -73,7 +68,6 @@ def main():
         def hook(module, inputs, output):
             is_tuple = isinstance(output, tuple)
             logits = output[0] if is_tuple else output
-            # При включенном checkpointing ловим нужный проход
             if logits.requires_grad:
                 logits.retain_grad()
                 layer_logits_dict[name] = logits
@@ -108,6 +102,12 @@ def main():
                            add_special_tokens=False)
         input_ids = inputs["input_ids"].to(model_device)
         attention_mask = inputs["attention_mask"].to(model_device)
+
+        # Жесткая обрезка контекста для защиты от OOM
+        MAX_SEQ_LEN = 512
+        if input_ids.shape[1] > MAX_SEQ_LEN:
+            input_ids = input_ids[:, -MAX_SEQ_LEN:]
+            attention_mask = attention_mask[:, -MAX_SEQ_LEN:]
 
         outputs = model(input_ids=input_ids,
                         attention_mask=attention_mask, use_cache=False)
