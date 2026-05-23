@@ -17,7 +17,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
-
+export PYTHONPATH=$PWD:$PYTHONPATH
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'" || exit 1
 
 mkdir -p results configs
