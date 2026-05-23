@@ -5,15 +5,7 @@ import gc
 from collections import defaultdict
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-def build_prompt(question, choices):
-    return (f"Question: {question}\n"
-            f"A. {choices[0]}\nB. {choices[1]}\nC. {choices[2]}\nD. {choices[3]}\nAnswer:")
-
-
-def prepare_choice_token_ids(tokenizer):
-    return {ch: tokenizer(" " + ch, add_special_tokens=False)["input_ids"][0] for ch in ["A", "B", "C", "D"]}
+from src.utils import build_prompt, prepare_choice_token_ids
 
 
 def main():

@@ -8,6 +8,8 @@ __pycache__/
 .DS_Store
 results/*.jsonl
 results/*.log
+local_results/*.jsonl
+local_results/*.log
 *.safetensors
 *.bin
 *.pt
