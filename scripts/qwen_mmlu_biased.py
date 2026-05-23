@@ -63,7 +63,7 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     return scores, router_info
 
 
-def apply_bias_hooks(model, bias_file, dtype):
+def apply_bias_hooks(model, bias_file, dtype, multiplier):
     with open(bias_file, "r", encoding="utf-8") as f:
         bias_data = json.load(f)
 
@@ -73,7 +73,7 @@ def apply_bias_hooks(model, bias_file, dtype):
         if layer_name in bias_data.get("bias", {}) and hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
             bias_tensor = torch.zeros(model.config.num_experts, dtype=dtype)
             for exp_id, val in bias_data["bias"][layer_name].items():
-                bias_tensor[int(exp_id)] = float(val)
+                bias_tensor[int(exp_id)] = float(val) * multiplier
 
             def get_hook(b_tensor):
                 def hook(module, args, output):
@@ -101,8 +101,8 @@ def main():
     parser.add_argument("--output", type=str,
                         default="results/math_biased_cluster.jsonl")
     parser.add_argument("--experts_impl", type=str, default="eager")
-    # Тот самый потерянный аргумент:
     parser.add_argument("--bias_file", type=str, required=True)
+    parser.add_argument("--bias_multiplier", type=float, default=1.0)
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -134,7 +134,7 @@ def main():
     model.eval()
     model.config._experts_implementation = args.experts_impl
 
-    apply_bias_hooks(model, args.bias_file, dtype)
+    apply_bias_hooks(model, args.bias_file, dtype, args.bias_multiplier)
 
     ds = load_dataset("cais/mmlu", args.subject, split=args.split)
     choice_token_ids = prepare_choice_token_ids(tokenizer)
