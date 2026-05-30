@@ -14,10 +14,11 @@ set -e
 export HF_HOME=/mnt/tank/scratch/$USER/.cache/huggingface
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH=$PWD:$PYTHONPATH
 
 source /nfs/home/$USER/miniconda3/etc/profile.d/conda.sh
 conda activate moe_env
-export PYTHONPATH=$PWD:$PYTHONPATH
+
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA is NOT available!'" || exit 1
 
 mkdir -p results configs
@@ -35,13 +36,36 @@ for MODEL in "${MODELS[@]}"; do
 
     for SUBJ in "${SUBJECTS[@]}"; do
         echo "--- Processing: $SUBJ on $MODEL_NAME ---"
-        python scripts/qwen_mmlu_onepass.py --model $MODEL --subject $SUBJ --output results/${MODEL_NAME}_${SUBJ}_baseline.jsonl --limit 10000 --experts_impl eager
-        python scripts/build_gradient_bias.py --model $MODEL --subject $SUBJ --output configs/${MODEL_NAME}_${SUBJ}_grad.json --limit 100 --experts_impl eager
-        python scripts/qwen_mmlu_biased.py --model $MODEL --subject $SUBJ --bias_file configs/${MODEL_NAME}_${SUBJ}_grad.json --output results/${MODEL_NAME}_${SUBJ}_biased.jsonl --limit 10000 --experts_impl eager
+        
+        # 1. Baseline
+        python scripts/qwen_mmlu_onepass.py \
+            --model $MODEL \
+            --subject $SUBJ \
+            --output results/${MODEL_NAME}_${SUBJ}_baseline.jsonl \
+            --limit 10000 \
+            --experts_impl eager
+        
+        # 2. Градиенты
+        python scripts/build_gradient_bias.py \
+            --model $MODEL \
+            --subject $SUBJ \
+            --output configs/${MODEL_NAME}_${SUBJ}_grad.json \
+            --limit 100 \
+            --experts_impl eager
+        
+        # 3. Инференс со смещением (ВКЛЮЧЕН МНОЖИТЕЛЬ)
+        python scripts/qwen_mmlu_biased.py \
+            --model $MODEL \
+            --subject $SUBJ \
+            --bias_file configs/${MODEL_NAME}_${SUBJ}_grad.json \
+            --output results/${MODEL_NAME}_${SUBJ}_biased.jsonl \
+            --limit 10000 \
+            --experts_impl eager \
+            --bias_multiplier 20.0
     done
 done
 
 echo "📊 AGGREGATING RESULTS..."
-python scripts/aggregate_results.py
+python scripts/analyze_all.py
 
 echo "=== NIGHT BATCH COMPLETED ==="

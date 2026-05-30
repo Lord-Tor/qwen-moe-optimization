@@ -102,7 +102,7 @@ def main():
         input_ids = inputs["input_ids"].to(model_device)
         attention_mask = inputs["attention_mask"].to(model_device)
 
-        MAX_SEQ_LEN = 512
+        MAX_SEQ_LEN = 256
         if input_ids.shape[1] > MAX_SEQ_LEN:
             input_ids = input_ids[:, -MAX_SEQ_LEN:]
             attention_mask = attention_mask[:, -MAX_SEQ_LEN:]
@@ -124,10 +124,11 @@ def main():
         for layer_name, logits_tensor in layer_logits_dict.items():
             if logits_tensor.grad is not None:
                 g = logits_tensor.grad
+                # ИСПРАВЛЕНИЕ: Усредняем градиенты по всему контексту
                 if g.dim() == 3:
-                    grad = g[0, -1, :].detach().to(model_device)
+                    grad = g[0, :, :].mean(dim=0).detach().to(model_device)
                 elif g.dim() == 2:
-                    grad = g[-1, :].detach().to(model_device)
+                    grad = g.mean(dim=0).detach().to(model_device)
                 else:
                     grad = g.detach().to(model_device)
 
