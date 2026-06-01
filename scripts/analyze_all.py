@@ -45,8 +45,9 @@ def main():
             continue
         variants = {
             "biased": f"results/{subj}_biased.jsonl",
+            "biased_rnd": f"results/{subj}_biased_randomctrl.jsonl",
             "biased_excl": f"results/{subj}_biased_excl.jsonl",
-            "random_ctrl": f"results/{subj}_biased_randomctrl.jsonl",
+            "excl_rnd": f"results/{subj}_biased_excl_randomctrl.jsonl",
         }
         row = {"Subject": subj, "Acc Base (%)": round(ab, 2)}
         for tag, path in variants.items():
@@ -70,8 +71,8 @@ def main():
     df = pd.DataFrame(rows)
     print("\n" + "=" * 100)
     print("QWEN-MOE ROUTING ANALYSIS  (Δ = изменение accuracy vs baseline)")
-    print("Сравни 'biased Δ' и 'biased_excl Δ' с 'random_ctrl Δ':")
-    print("если эффект bias НЕ превышает random_ctrl — он неспецифичен.")
+    print("Сравни пары: 'biased Δ' vs 'biased_rnd Δ', и 'biased_excl Δ' vs 'excl_rnd Δ'.")
+    print("Если bias-эффект НЕ превышает свой random-контроль — он неспецифичен.")
     print("=" * 100)
     try:
         print(df.to_markdown(index=False))

@@ -14,7 +14,8 @@ def build(avg_grads, freq, topk, bias_value, exclude_dominant):
         if exclude_dominant:
             dom = freq.get(name)
             if dom is not None:
-                avg[dom > 0] = float("inf")  # доминирующих не берём в "полезные"
+                # доминирующих не берём в "полезные"
+                avg[dom > 0] = float("inf")
         idx = torch.topk(avg, k=topk, largest=False).indices
         bias[name] = {str(int(i)): bias_value for i in idx}
     return bias
@@ -33,17 +34,25 @@ def main():
     avg_grads, freq = data["avg_grads"], data.get("freq", {})
     subject = data.get("subject", "unknown")
 
+    normal_bias = build(avg_grads, freq, args.topk_experts,
+                        args.bias_value, False)
+    if not normal_bias:
+        raise RuntimeError(
+            f"Пустой bias из {args.raw} — нет слоёв. Сбор градиентов сломан.")
     normal = {"domain": f"{subject}_grad", "meta": {"exclude_dominant": False},
-              "bias": build(avg_grads, freq, args.topk_experts, args.bias_value, False)}
+              "bias": normal_bias}
     os.makedirs(os.path.dirname(args.out_normal) or ".", exist_ok=True)
-    json.dump(normal, open(args.out_normal, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    json.dump(normal, open(args.out_normal, "w", encoding="utf-8"),
+              ensure_ascii=False, indent=2)
     print(f"[bias] normal -> {args.out_normal} ({len(normal['bias'])} layers)")
 
     if args.out_exclude:
         excl = {"domain": f"{subject}_grad_excl", "meta": {"exclude_dominant": True},
                 "bias": build(avg_grads, freq, args.topk_experts, args.bias_value, True)}
-        json.dump(excl, open(args.out_exclude, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        print(f"[bias] exclude -> {args.out_exclude} ({len(excl['bias'])} layers)")
+        json.dump(excl, open(args.out_exclude, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
+        print(
+            f"[bias] exclude -> {args.out_exclude} ({len(excl['bias'])} layers)")
 
 
 if __name__ == "__main__":

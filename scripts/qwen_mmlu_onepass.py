@@ -12,6 +12,11 @@ def onepass_choice_scores(model, tokenizer, device, prompt, choice_token_ids):
     input_ids, attention_mask = inputs["input_ids"].to(
         device), inputs["attention_mask"].to(device)
 
+    MAX_SEQ_LEN = 512  # как в qwen_mmlu_biased.py — для сопоставимости baseline/biased
+    if input_ids.shape[1] > MAX_SEQ_LEN:
+        input_ids = input_ids[:, -MAX_SEQ_LEN:]
+        attention_mask = attention_mask[:, -MAX_SEQ_LEN:]
+
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask,
                         use_cache=False, output_router_logits=True, return_dict=True)
@@ -36,24 +41,30 @@ def main():
                         default="results/mmlu_onepass_results.jsonl")
     parser.add_argument("--experts_impl", type=str, default="batched_mm")
     args = parser.parse_args()
+    import os
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     if torch.cuda.is_available():
         dtype = torch.float16
+        n_gpu = torch.cuda.device_count()
+        max_mem = {0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True, device_map="auto", attn_implementation="sdpa")
+            args.model, dtype=dtype, low_cpu_mem_usage=True, device_map="auto",
+            max_memory=max_mem, attn_implementation="sdpa",
+            offload_folder="/mnt/tank/scratch/" + __import__("os").environ.get("USER", "tmp") + "/.offload_qwen")
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
         dtype = torch.float16
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True)
+            args.model, dtype=dtype, low_cpu_mem_usage=True)
         model_device = "mps"
         model.to(model_device)
     else:
         dtype = torch.float32
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True)
+            args.model, dtype=dtype, low_cpu_mem_usage=True)
         model_device = "cpu"
         model.to(model_device)
 
