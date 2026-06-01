@@ -146,6 +146,8 @@ def main():
     parser.add_argument("--checkpoint_mode",
                         choices=["auto", "on", "off"], default="auto")
     parser.add_argument("--exclude_dominant", action="store_true")
+    parser.add_argument("--save_raw_grads", type=str, default=None,
+                        help="Путь .pt для сырых усреднённых градиентов и частот (переиспользование).")
     args = parser.parse_args()
 
     if torch.cuda.is_available():
@@ -238,6 +240,19 @@ def main():
     print(
         f"[diag] суммарная норма градиентов = {total_norm:.6f}, processed={processed}")
     assert total_norm > 0, "Градиенты НУЛЕВЫЕ — захват не сработал."
+
+    if args.save_raw_grads:
+        import os as _os
+        _os.makedirs(_os.path.dirname(args.save_raw_grads)
+                     or ".", exist_ok=True)
+        torch.save({
+            "avg_grads": {k: (v / processed).cpu() for k, v in accumulated.items()},
+            "freq": {k: v.cpu() for k, v in freq.items()},
+            "processed": processed,
+            "num_experts": model.config.num_experts,
+            "subject": args.subject,
+        }, args.save_raw_grads)
+        print(f"[raw] Сырые градиенты сохранены в {args.save_raw_grads}")
 
     print("=== Generating Bias Config ===")
     bias_config = {"domain": f"{args.subject}_grad",
