@@ -3,9 +3,9 @@
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --exclude=laplas,turing,mars,midas 
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=20G
+#SBATCH --mem=48G
 #SBATCH --time=00:30:00
 #SBATCH --output=slurm_smoke_%j.log
 
