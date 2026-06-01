@@ -11,9 +11,23 @@ McNemar: для парных бинарных исходов (один и тот
 import argparse
 import glob
 import json
+import math
 import os
 import numpy as np
-from scipy import stats
+
+
+def binom_two_sided_p(k, n, p=0.5):
+    """Точный двусторонний биномиальный тест без scipy.
+    P = сумма биномиальных вероятностей всех исходов не вероятнее наблюдаемого."""
+    if n == 0:
+        return 1.0
+    from math import comb
+    probs = [comb(n, i) * (p ** i) * ((1 - p) ** (n - i))
+             for i in range(n + 1)]
+    obs = probs[k]
+    # суммируем хвосты: все исходы с вероятностью <= наблюдаемой (с допуском на float)
+    eps = 1e-12
+    return float(min(1.0, sum(pr for pr in probs if pr <= obs + eps)))
 
 
 def load(path):
@@ -43,7 +57,7 @@ def mcnemar_exact(base_c, bias_c, idxs):
         return b01, b10, 1.0
     # двусторонний точный биномиальный тест с p=0.5
     k = min(b01, b10)
-    p = stats.binomtest(k, n, 0.5, alternative="two-sided").pvalue
+    p = binom_two_sided_p(k, n, 0.5)
     return b01, b10, p
 
 
@@ -125,7 +139,8 @@ def main():
     print("Интерпретация:")
     print("  mcnemar_p < 0.05 -> улучшение статзначимо (исправлений достоверно больше поломок).")
     print("  CI95 не включает 0 -> Δ устойчиво положительна.")
-    print("  Сравни строку домена с её [random-ctrl]: у настоящего bias p должно быть меньше.\n")
+    print(
+        "  Сравни строку домена с её [random-ctrl]: у настоящего bias p должно быть меньше.\n")
 
 
 if __name__ == "__main__":
