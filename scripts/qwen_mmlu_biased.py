@@ -155,24 +155,27 @@ def main():
     parser.add_argument("--random_control", action="store_true",
                         help="Доп. прогон со случайным bias (контроль научной валидности)")
     args = parser.parse_args()
+    import os
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
     if torch.cuda.is_available():
         dtype = torch.float16
-        max_mem = {0: "10GiB", 1: "22GiB"}
+        n_gpu = torch.cuda.device_count()
+        max_mem = {0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True,
+            args.model, dtype=dtype, low_cpu_mem_usage=True,
             device_map="auto", max_memory=max_mem, attn_implementation="sdpa")
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
         dtype = torch.float16
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True)
+            args.model, dtype=dtype, low_cpu_mem_usage=True)
         model_device = "mps"
         model.to(model_device)
     else:
         dtype = torch.float32
         model = AutoModelForCausalLM.from_pretrained(
-            args.model, torch_dtype=dtype, low_cpu_mem_usage=True)
+            args.model, dtype=dtype, low_cpu_mem_usage=True)
         model_device = "cpu"
         model.to(model_device)
 
