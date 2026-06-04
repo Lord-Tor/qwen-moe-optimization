@@ -154,7 +154,10 @@ def main():
         dtype = torch.float16
         # На 1 GPU max_memory с ключом 1 упадёт — берём только реально видимые карты.
         n_gpu = torch.cuda.device_count()
-        if n_gpu >= 2:
+        if "qwen" not in args.model.lower():
+            # не-Qwen (напр. OLMoE 14GB): авто-баланс accelerate
+            max_mem = None
+        elif n_gpu >= 2:
             max_mem = {0: "10GiB", 1: "22GiB"}
         else:
             max_mem = {0: "22GiB"}

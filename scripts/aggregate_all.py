@@ -50,7 +50,8 @@ def routing_metrics(base, other):
         o_rt = orr.get("router_last_token_topk", {})
         for lay in b_rt:
             if lay in o_rt:
-                jac_tot += jaccard(b_rt[lay]["topk_experts"], o_rt[lay]["topk_experts"])
+                jac_tot += jaccard(b_rt[lay]["topk_experts"],
+                                   o_rt[lay]["topk_experts"])
                 jac_n += 1
     jac = (jac_tot / jac_n * 100) if jac_n else None
     cshift = float(np.mean(conf_shifts)) if conf_shifts else None
@@ -117,14 +118,16 @@ def main():
     summary = {"model": MN, "domains": {}}
 
     for bf in base_files:
-        subj = os.path.basename(bf).replace(f"{MN}_", "").replace("_baseline.jsonl", "")
+        subj = os.path.basename(bf).replace(
+            f"{MN}_", "").replace("_baseline.jsonl", "")
         full = f"{MN}_{subj}"
         base = load_jsonl(bf)
         opt = load_jsonl(f"{args.final_dir}/{full}_opt.jsonl")
         rnd = load_jsonl(f"{args.final_dir}/{full}_opt_randomctrl.jsonl")
         scan = load_scan(f"{args.scan_dir}/{full}_scan.jsonl")
 
-        entry = {"n": len(base) if base else None, "acc_base": round(acc_of(base), 2) if base else None}
+        entry = {"n": len(base) if base else None, "acc_base": round(
+            acc_of(base), 2) if base else None}
         if opt:
             entry["acc_opt"] = round(acc_of(opt), 2)
             entry["delta_opt"] = round(acc_of(opt) - acc_of(base), 2)
@@ -141,8 +144,12 @@ def main():
             entry["random_mcnemar_p"] = pr
         if scan:
             entry["scan_delta_by_mult"] = scan
-            best_m = max(scan, key=lambda m: scan[m])
-            entry["scan_best_mult"], entry["scan_best_delta"] = best_m, scan[best_m]
+            valid = {m: d for m, d in scan.items() if d is not None}
+            if valid:
+                best_m = max(valid, key=lambda m: valid[m])
+                entry["scan_best_mult"], entry["scan_best_delta"] = best_m, valid[best_m]
+            else:
+                entry["scan_best_mult"], entry["scan_best_delta"] = None, None
         summary["domains"][subj] = entry
 
     out_json = f"{args.out_dir}/{MN}_summary.json"
@@ -150,13 +157,13 @@ def main():
         json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"[saved] {out_json}")
 
-    # CSV-плоская таблица
     try:
         import pandas as pd
         flat = []
         for subj, e in summary["domains"].items():
             row = {"domain": subj}
-            row.update({k: v for k, v in e.items() if k != "scan_delta_by_mult"})
+            row.update({k: v for k, v in e.items()
+                       if k != "scan_delta_by_mult"})
             flat.append(row)
         df = pd.DataFrame(flat)
         out_csv = f"{args.out_dir}/{MN}_summary.csv"

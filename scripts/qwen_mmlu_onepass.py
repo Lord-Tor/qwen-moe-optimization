@@ -49,7 +49,8 @@ def main():
     if torch.cuda.is_available():
         dtype = torch.float16
         n_gpu = torch.cuda.device_count()
-        max_mem = {0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}
+        max_mem = ({0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}) \
+            if "qwen" in args.model.lower() else None  # не-Qwen: авто-баланс
         model = AutoModelForCausalLM.from_pretrained(
             args.model, dtype=dtype, low_cpu_mem_usage=True, device_map="auto",
             max_memory=max_mem, attn_implementation="sdpa",

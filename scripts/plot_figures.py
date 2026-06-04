@@ -3,13 +3,13 @@
   fig2: bar-chart Δ optimal-bias vs random-control, со звёздочками значимости McNemar.
 Запуск: python scripts/plot_figures.py --summary results/summary/Qwen1.5-MoE-A2.7B_summary.json
 """
+import numpy as np
+import matplotlib.pyplot as plt
 import argparse
 import json
 import os
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
 
 
 def sig_stars(p):
@@ -31,6 +31,9 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
+    if not os.path.exists(args.summary):
+        print(f"[warn] нет {args.summary} — сначала запусти aggregate_all.py")
+        return
     with open(args.summary) as f:
         S = json.load(f)
     model = S["model"]
@@ -42,9 +45,13 @@ def main():
         scan = e.get("scan_delta_by_mult")
         if not scan:
             continue
-        mults = sorted(float(m) for m in scan)
-        deltas = [scan[str(m)] if str(m) in scan else scan[m] for m in mults]
-        ax.plot(mults, deltas, marker="o", label=subj)
+        mults_all = sorted(float(m) for m in scan)
+        pts = [(m, scan.get(str(m), scan.get(m))) for m in mults_all]
+        pts = [(m, d) for m, d in pts if d is not None]
+        if not pts:
+            continue
+        ax.plot([m for m, _ in pts], [d for _, d in pts],
+                marker="o", label=subj)
     ax.axhline(0, color="gray", lw=1, ls="--")
     ax.set_xscale("log")
     ax.set_xlabel("bias multiplier (log)")
@@ -53,7 +60,9 @@ def main():
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     f1 = f"{args.out_dir}/{model}_fig1_multiplier_curve.png"
-    fig.tight_layout(); fig.savefig(f1, dpi=150); plt.close(fig)
+    fig.tight_layout()
+    fig.savefig(f1, dpi=150)
+    plt.close(fig)
     print(f"[saved] {f1}")
 
     # ---- fig2: bias vs random, с значимостью ----
@@ -63,7 +72,8 @@ def main():
     bias_d = [domains[s]["delta_opt"] for s in subj_list]
     rand_d = [domains[s].get("delta_random", 0) for s in subj_list]
     fig, ax = plt.subplots(figsize=(9, 5))
-    b1 = ax.bar(x - w/2, bias_d, w, label="gradient bias (opt)", color="#2a6f97")
+    b1 = ax.bar(x - w/2, bias_d, w,
+                label="gradient bias (opt)", color="#2a6f97")
     b2 = ax.bar(x + w/2, rand_d, w, label="random control", color="#bbbbbb")
     # звёздочки значимости над bias-барами
     for i, s in enumerate(subj_list):
@@ -76,11 +86,14 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels([s.replace("_", "\n") for s in subj_list], fontsize=8)
     ax.set_ylabel("Δ accuracy vs baseline (п.п.)")
-    ax.set_title(f"{model}: gradient bias vs random control (* = McNemar p<0.05)")
+    ax.set_title(
+        f"{model}: gradient bias vs random control (* = McNemar p<0.05)")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
     f2 = f"{args.out_dir}/{model}_fig2_bias_vs_random.png"
-    fig.tight_layout(); fig.savefig(f2, dpi=150); plt.close(fig)
+    fig.tight_layout()
+    fig.savefig(f2, dpi=150)
+    plt.close(fig)
     print(f"[saved] {f2}")
 
 

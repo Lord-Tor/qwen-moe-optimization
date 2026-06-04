@@ -22,7 +22,8 @@ from src.utils import build_prompt, prepare_choice_token_ids
 try:
     from scripts.qwen_mmlu_biased import make_topk_recompute_hook
 except ImportError:
-    import sys, os as _os
+    import sys
+    import os as _os
     sys.path.insert(0, _os.path.join(_os.path.dirname(__file__)))
     from qwen_mmlu_biased import make_topk_recompute_hook
 
@@ -75,7 +76,8 @@ def eval_acc(model, tokenizer, device, ds, choice_token_ids, answer_map, limit):
             break
         gold = answer_map[int(ex["answer"])]
         prompt = build_prompt(ex["question"], ex["choices"])
-        scores = score_prompt(model, tokenizer, device, prompt, choice_token_ids)
+        scores = score_prompt(model, tokenizer, device,
+                              prompt, choice_token_ids)
         pred = max(scores, key=scores.get)
         total += 1
         correct += int(pred == gold)
@@ -92,7 +94,8 @@ def main():
     p.add_argument("--split", default="test")
     p.add_argument("--limit", type=int, default=10000)
     p.add_argument("--bias_file", required=True)
-    p.add_argument("--baseline", required=True, help="baseline jsonl для опорной accuracy")
+    p.add_argument("--baseline", required=True,
+                   help="baseline jsonl для опорной accuracy")
     p.add_argument("--out", required=True)
     p.add_argument("--multipliers", nargs="+", type=float,
                    default=[0.5, 1, 2, 5, 10, 20, 50])
@@ -102,7 +105,8 @@ def main():
     if torch.cuda.is_available():
         dtype = torch.float16
         n_gpu = torch.cuda.device_count()
-        max_mem = {0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}
+        max_mem = ({0: "10GiB", 1: "22GiB"} if n_gpu >= 2 else {0: "22GiB"}) \
+            if "qwen" in args.model.lower() else None  # не-Qwen: авто-баланс
         model = AutoModelForCausalLM.from_pretrained(
             args.model, dtype=dtype, low_cpu_mem_usage=True, device_map="auto",
             max_memory=max_mem, attn_implementation="sdpa",
@@ -110,8 +114,10 @@ def main():
         device = model.model.embed_tokens.weight.device
     else:
         dtype = torch.float32
-        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, low_cpu_mem_usage=True)
-        device = "cpu"; model.to(device)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, dtype=dtype, low_cpu_mem_usage=True)
+        device = "cpu"
+        model.to(device)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model.eval()
@@ -125,15 +131,21 @@ def main():
     answer_map = {0: "A", 1: "B", 2: "C", 3: "D"}
 
     acc_base = load_baseline_acc(args.baseline)
+    if acc_base is None:
+        raise RuntimeError(
+            f"baseline пуст/не найден: {args.baseline}. Скан невозможен без опорной accuracy.")
     print(f"[scan] subject={args.subject} baseline_acc={acc_base}")
 
     results = []
     for mult in args.multipliers:
-        hooks = apply_hooks(model, bias_data, dtype, mult, top_k, norm_topk_prob)
-        acc, n = eval_acc(model, tokenizer, device, ds, choice_token_ids, answer_map, args.limit)
+        hooks = apply_hooks(model, bias_data, dtype,
+                            mult, top_k, norm_topk_prob)
+        acc, n = eval_acc(model, tokenizer, device, ds,
+                          choice_token_ids, answer_map, args.limit)
         for h in hooks:
             h.remove()
-        delta = (acc - acc_base) if (acc is not None and acc_base is not None) else None
+        delta = (
+            acc - acc_base) if (acc is not None and acc_base is not None) else None
         row = {"subject": args.subject, "multiplier": mult, "acc": round(acc, 2),
                "acc_base": round(acc_base, 2) if acc_base else None,
                "delta": round(delta, 2) if delta is not None else None, "n": n}
@@ -145,9 +157,11 @@ def main():
         for r in results:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"[scan] saved -> {args.out}")
-    best = max((r for r in results if r["delta"] is not None), key=lambda r: r["delta"], default=None)
+    best = max((r for r in results if r["delta"] is not None),
+               key=lambda r: r["delta"], default=None)
     if best:
-        print(f"[scan] BEST: mult={best['multiplier']} delta={best['delta']:+.2f}")
+        print(
+            f"[scan] BEST: mult={best['multiplier']} delta={best['delta']:+.2f}")
 
 
 if __name__ == "__main__":

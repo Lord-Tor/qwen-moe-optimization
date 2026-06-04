@@ -29,40 +29,40 @@ SUBJECTS=("high_school_mathematics" "abstract_algebra" "formal_logic" "college_m
 GRAD_LIMIT=40
 MULTS="0.5 1 2 5 10 20 50"
 
-run_domain () (
-    set -e
-    SUBJ="$1"
-    DONE="results/${MN}_${SUBJ}.done"
-    [ -f "$DONE" ] && { echo "[skip] $SUBJ"; exit 0; }
+# ВАЖНО: НЕ полагаемся на 'set -e' — он отключается в функции, вызванной в 'if'.
+# Проверяем код возврата КАЖДОГО шага явно через '|| return 1'.
+run_domain () {
+    local SUBJ="$1"
+    local DONE="results/${MN}_${SUBJ}.done"
+    if [ -f "$DONE" ]; then echo "[skip] $SUBJ"; return 0; fi
     echo "######## OLMoE DOMAIN: $SUBJ ########"
 
-    # baseline
     python scripts/qwen_mmlu_onepass.py \
         --model $MODEL --subject $SUBJ \
-        --output results/${MN}_${SUBJ}_baseline.jsonl --limit 10000
+        --output results/${MN}_${SUBJ}_baseline.jsonl --limit 10000 || return 1
 
-    # градиенты + конфиг
     python scripts/build_gradient_bias.py \
         --model $MODEL --subject $SUBJ \
         --output configs/${MN}_${SUBJ}_grad.json \
         --save_raw_grads configs/raw/${MN}_${SUBJ}_grad.pt \
-        --limit $GRAD_LIMIT --checkpoint_mode auto
+        --limit $GRAD_LIMIT --checkpoint_mode auto || return 1
+
     python scripts/make_bias_from_grads.py \
         --raw configs/raw/${MN}_${SUBJ}_grad.pt \
         --out_normal configs/${MN}_${SUBJ}_normal.json \
-        --out_exclude configs/${MN}_${SUBJ}_exclude.json
+        --out_exclude configs/${MN}_${SUBJ}_exclude.json || return 1
 
-    # скан множителя
     python scripts/multiplier_scan.py \
         --model $MODEL --subject $SUBJ \
         --bias_file configs/${MN}_${SUBJ}_normal.json \
         --baseline results/${MN}_${SUBJ}_baseline.jsonl \
         --out results/scan/${MN}_${SUBJ}_scan.jsonl \
-        --multipliers $MULTS
+        --multipliers $MULTS || return 1
 
-    touch "$DONE"
+    touch "$DONE"          # ставится ТОЛЬКО если все шаги вернули 0
     echo "[done] $SUBJ"
-)
+    return 0
+}
 
 echo "=== OLMoE FULL ($(date)) ==="
 FAILED=()
