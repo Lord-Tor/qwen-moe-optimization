@@ -97,6 +97,7 @@ def main():
     p.add_argument("--baseline", required=True,
                    help="baseline jsonl для опорной accuracy")
     p.add_argument("--out", required=True)
+    p.add_argument("--experts_impl", default="eager")
     p.add_argument("--multipliers", nargs="+", type=float,
                    default=[0.5, 1, 2, 5, 10, 20, 50])
     args = p.parse_args()
@@ -109,7 +110,7 @@ def main():
             if "qwen" in args.model.lower() else None  # не-Qwen: авто-баланс
         model = AutoModelForCausalLM.from_pretrained(
             args.model, dtype=dtype, low_cpu_mem_usage=True, device_map="auto",
-            max_memory=max_mem, attn_implementation="sdpa",
+            max_memory=max_mem, attn_implementation="sdpa", experts_implementation=args.experts_impl,
             offload_folder="/mnt/tank/scratch/" + os.environ.get("USER", "tmp") + "/.offload_qwen")
         device = model.model.embed_tokens.weight.device
     else:

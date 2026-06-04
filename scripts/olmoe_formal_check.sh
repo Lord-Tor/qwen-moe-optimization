@@ -22,13 +22,13 @@ conda activate moe_env
 MODEL="allenai/OLMoE-1B-7B-0924"
 MN=$(basename $MODEL)
 
-echo "=== ПРОВЕРКА ФИКСА ПАМЯТИ на formal_logic (тот домен, что падал) ==="
+echo "=== ПРОВЕРКА ФИКСА: experts_implementation=eager (режет пик batched_mm) на formal_logic (тот домен, что падал) ==="
 echo "Если max_memory-фикс сработал — пройдёт без CUDA OOM на длинных промптах."
 nvidia-smi --query-gpu=index,memory.total,memory.used --format=csv
 
 python scripts/qwen_mmlu_onepass.py \
     --model $MODEL --subject formal_logic \
     --output results/${MN}_formal_logic_baseline.jsonl \
-    --limit 10000
+    --limit 10000 --experts_impl eager
 
 echo "=== Если выше 'Done. Accuracy' и нет OOM — фикс работает, можно полный olmoe_full ==="

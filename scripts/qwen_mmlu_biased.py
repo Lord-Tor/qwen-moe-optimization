@@ -165,7 +165,7 @@ def main():
             if "qwen" in args.model.lower() else None  # не-Qwen: авто-баланс
         model = AutoModelForCausalLM.from_pretrained(
             args.model, dtype=dtype, low_cpu_mem_usage=True,
-            device_map="auto", max_memory=max_mem, attn_implementation="sdpa",
+            device_map="auto", max_memory=max_mem, attn_implementation="sdpa", experts_implementation=args.experts_impl,
             offload_folder="/mnt/tank/scratch/" + __import__("os").environ.get("USER", "tmp") + "/.offload_qwen")
         model_device = model.model.embed_tokens.weight.device
     elif torch.backends.mps.is_available():
