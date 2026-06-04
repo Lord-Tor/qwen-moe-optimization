@@ -1,9 +1,7 @@
-torch
-torchvision
-torchaudio
-accelerate
-datasets
-evaluate
-sentencepiece
-huggingface_hub
-transformers>=4.38.0
+torch>=2.0
+transformers>=5.0
+datasets>=2.0
+accelerate>=0.30
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7

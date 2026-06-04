@@ -1,18 +1,35 @@
+# Сырые результаты (тяжёлые, не для git) — кроме сводок
+results/*
+!results/summary/
+results/summary/*
+!results/summary/*.json
+!results/summary/*.csv
+!results/summary/*.png
 
-.venv/
-env/
-venv/
+# Сырые градиенты и сгенерированные конфиги
+configs/raw/
+configs/*.json
+
+# Маркеры завершения доменов
+*.done
+*.optdone
+
+# Slurm-логи
+slurm_*.log
+*.out
+
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-.DS_Store
-results/*.jsonl
-results/*.log
-local_results/*.jsonl
-local_results/*.log
-*.safetensors
-*.bin
-*.pt
+.venv/
+venv/
+*.egg-info/
 
-# Датасеты и локальные данные
-data/
+# Кэши/мусор
+.offload_qwen/
+.DS_Store
+repo_context.txt
+local_results/
+cleanup_repo.sh
+expert_distribution_comparison.png
+plot_expert_distribution.py
