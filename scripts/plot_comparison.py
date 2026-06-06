@@ -62,12 +62,17 @@ def main():
         print("Нет данных.")
         return
 
-    # общий список доменов (объединение, в стабильном порядке)
+    # Только домены, где есть delta_opt хотя бы у одной модели (т.е. был финальный
+    # прогон на оптимальном множителе — это math-домены). Non-math домены попадают
+    # в summary через baseline/costscan, но у них нет delta_opt -> пустые столбцы.
     all_domains = []
     for _, dom in models:
         for d in dom:
-            if d not in all_domains:
+            if d not in all_domains and dom[d].get("delta_opt") is not None:
                 all_domains.append(d)
+    if not all_domains:
+        print("[warn] нет доменов с delta_opt — нечего сравнивать")
+        return
 
     x = np.arange(len(all_domains))
     n_models = len(models)
