@@ -11,6 +11,21 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 
+DOMAIN_LABELS = {
+    "abstract_algebra": "Abstract\nAlgebra",
+    "college_mathematics": "College\nMath",
+    "high_school_mathematics": "HS Math",
+    "formal_logic": "Formal\nLogic",
+    "professional_law": "Law",
+    "college_biology": "Biology",
+    "high_school_world_history": "World\nHistory",
+    "moral_scenarios": "Moral\nScenarios",
+}
+
+
+def pretty(name):
+    return DOMAIN_LABELS.get(name, name.replace("_", " ").title())
+
 
 def sig_stars(p):
     if p is None:
@@ -51,7 +66,7 @@ def main():
         if not pts:
             continue
         ax.plot([m for m, _ in pts], [d for _, d in pts],
-                marker="o", label=subj)
+                marker="o", label=pretty(subj).replace("\n", " "))
     ax.axhline(0, color="gray", lw=1, ls="--")
     ax.set_xscale("log")
     ax.set_xlabel("bias multiplier (log)")
@@ -84,7 +99,7 @@ def main():
                 ha="center", fontsize=11, fontweight="bold")
     ax.axhline(0, color="gray", lw=1)
     ax.set_xticks(x)
-    ax.set_xticklabels([s.replace("_", "\n") for s in subj_list], fontsize=8)
+    ax.set_xticklabels([pretty(s) for s in subj_list], fontsize=8)
     ax.set_ylabel("Δ accuracy vs baseline (п.п.)")
     ax.set_title(
         f"{model}: gradient bias vs random control (* = McNemar p<0.05)")
