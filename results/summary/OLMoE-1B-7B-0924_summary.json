@@ -1,0 +1,141 @@
+{
+  "model": "OLMoE-1B-7B-0924",
+  "domains": {
+    "abstract_algebra": {
+      "n": 100,
+      "acc_base": 33.0,
+      "acc_opt": 35.0,
+      "delta_opt": 2.0,
+      "mcnemar_fixes": 18,
+      "mcnemar_breaks": 16,
+      "mcnemar_p": 0.8642,
+      "boot_CI95": [
+        -9.0,
+        13.0
+      ],
+      "jaccard_overlap_pct": 84.41,
+      "confidence_shift": 0.2723,
+      "significant_0.05": false,
+      "acc_random": 37.0,
+      "delta_random": 4.0,
+      "random_mcnemar_p": 0.125,
+      "scan_delta_by_mult": {
+        "0.5": -1.0,
+        "1.0": 0.0,
+        "2.0": 2.0,
+        "5.0": -9.0,
+        "10.0": -10.0,
+        "20.0": -3.0,
+        "50.0": -1.0
+      },
+      "scan_best_mult": 2.0,
+      "scan_best_delta": 2.0
+    },
+    "college_biology": {
+      "n": 144,
+      "acc_base": 52.08
+    },
+    "college_mathematics": {
+      "n": 100,
+      "acc_base": 35.0,
+      "acc_opt": 36.0,
+      "delta_opt": 1.0,
+      "mcnemar_fixes": 9,
+      "mcnemar_breaks": 8,
+      "mcnemar_p": 1.0,
+      "boot_CI95": [
+        -7.0,
+        9.0
+      ],
+      "jaccard_overlap_pct": 92.5,
+      "confidence_shift": 0.1036,
+      "significant_0.05": false,
+      "acc_random": 36.0,
+      "delta_random": 1.0,
+      "random_mcnemar_p": 1.0,
+      "scan_delta_by_mult": {
+        "0.5": -3.0,
+        "1.0": 2.0,
+        "2.0": -5.0,
+        "5.0": -10.0,
+        "10.0": -7.0,
+        "20.0": -13.0,
+        "50.0": -8.0
+      },
+      "scan_best_mult": 1.0,
+      "scan_best_delta": 2.0
+    },
+    "formal_logic": {
+      "n": 126,
+      "acc_base": 28.57,
+      "acc_opt": 37.3,
+      "delta_opt": 8.73,
+      "mcnemar_fixes": 26,
+      "mcnemar_breaks": 15,
+      "mcnemar_p": 0.1173,
+      "boot_CI95": [
+        -0.8,
+        19.0
+      ],
+      "jaccard_overlap_pct": 84.73,
+      "confidence_shift": 0.5865,
+      "significant_0.05": false,
+      "acc_random": 29.37,
+      "delta_random": 0.79,
+      "random_mcnemar_p": 1.0,
+      "scan_delta_by_mult": {
+        "0.5": -2.38,
+        "1.0": 0.0,
+        "2.0": 8.73,
+        "5.0": 6.35,
+        "10.0": 1.59,
+        "20.0": -2.38,
+        "50.0": -0.79
+      },
+      "scan_best_mult": 2.0,
+      "scan_best_delta": 8.73
+    },
+    "high_school_mathematics": {
+      "n": 270,
+      "acc_base": 30.74,
+      "acc_opt": 31.48,
+      "delta_opt": 0.74,
+      "mcnemar_fixes": 36,
+      "mcnemar_breaks": 34,
+      "mcnemar_p": 0.905,
+      "boot_CI95": [
+        -5.2,
+        7.0
+      ],
+      "jaccard_overlap_pct": 87.7,
+      "confidence_shift": 0.145,
+      "significant_0.05": false,
+      "acc_random": 32.96,
+      "delta_random": 2.22,
+      "random_mcnemar_p": 0.3449,
+      "scan_delta_by_mult": {
+        "0.5": 0.0,
+        "1.0": -2.59,
+        "2.0": 0.74,
+        "5.0": -8.89,
+        "10.0": -5.93,
+        "20.0": -11.11,
+        "50.0": -8.89
+      },
+      "scan_best_mult": 2.0,
+      "scan_best_delta": 0.74
+    },
+    "high_school_world_history": {
+      "n": 237,
+      "acc_base": 67.93
+    },
+    "moral_scenarios": {
+      "n": 895,
+      "acc_base": 22.23
+    },
+    "professional_law": {
+      "n": 1534,
+      "acc_base": 37.87
+    }
+  }
+}

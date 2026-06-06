@@ -1,0 +1,5 @@
+domain,n,acc_base,acc_opt,delta_opt,mcnemar_fixes,mcnemar_breaks,mcnemar_p,boot_CI95,jaccard_overlap_pct,confidence_shift,significant_0.05,acc_random,delta_random,random_mcnemar_p,scan_best_mult,scan_best_delta
+abstract_algebra,100,31.0,42.0,11.0,14,3,0.0127,"[3.0, 19.0]",84.7,0.4576,True,33.0,2.0,0.5,1.0,10.0
+college_mathematics,100,31.0,40.0,9.0,13,4,0.049,"[1.0, 17.0]",90.47,0.6254,True,31.0,0.0,1.0,1.0,8.0
+formal_logic,126,35.71,42.86,7.14,25,16,0.211,"[-2.4, 16.7]",71.46,0.2478,False,42.06,6.35,0.1338,5.0,7.14
+high_school_mathematics,270,28.89,38.52,9.63,65,39,0.0138,"[2.2, 16.7]",64.57,1.9575,True,31.85,2.96,0.302,5.0,8.15

@@ -1,0 +1,9 @@
+domain,n,acc_base,acc_opt,delta_opt,mcnemar_fixes,mcnemar_breaks,mcnemar_p,boot_CI95,jaccard_overlap_pct,confidence_shift,significant_0.05,acc_random,delta_random,random_mcnemar_p,scan_best_mult,scan_best_delta
+abstract_algebra,100,33.0,35.0,2.0,18.0,16.0,0.8642,"[-9.0, 13.0]",84.41,0.2723,False,37.0,4.0,0.125,2.0,2.0
+college_biology,144,52.08,,,,,,,,,,,,,,
+college_mathematics,100,35.0,36.0,1.0,9.0,8.0,1.0,"[-7.0, 9.0]",92.5,0.1036,False,36.0,1.0,1.0,1.0,2.0
+formal_logic,126,28.57,37.3,8.73,26.0,15.0,0.1173,"[-0.8, 19.0]",84.73,0.5865,False,29.37,0.79,1.0,2.0,8.73
+high_school_mathematics,270,30.74,31.48,0.74,36.0,34.0,0.905,"[-5.2, 7.0]",87.7,0.145,False,32.96,2.22,0.3449,2.0,0.74
+high_school_world_history,237,67.93,,,,,,,,,,,,,,
+moral_scenarios,895,22.23,,,,,,,,,,,,,,
+professional_law,1534,37.87,,,,,,,,,,,,,,
